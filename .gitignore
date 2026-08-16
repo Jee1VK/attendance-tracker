@@ -1,0 +1,11 @@
+# PyInstaller & Temporary Server Binaries
+AttendanceServer.exe
+AttendanceServer.spec
+build/
+dist/
+cloudflared.exe
+qr_code.png
+.user_uploaded/
+scratch/
+__pycache__/
+*.log

@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Handwritten PDF to Attendance Report Converter</title>
+  <meta name="description" content="Convert handwritten daily attendance register PDFs directly into styled PDF reports with red shortfall highlights (<9 hours) for WhatsApp sharing.">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <!-- PWA Mobile App Support -->
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Attendance">
+  <link rel="apple-touch-icon" href="./icon-512.png">
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="./src/styles.css">
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW reg error:', err));
+      });
+    }
+  </script>
+
+  <!-- jsPDF & AutoTable for PDF Generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- HTML2Canvas for Copying Report Image to Clipboard -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <!-- PDF.js for rendering uploaded multi-page PDF attendance documents -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Brand Header -->
+    <header class="app-header">
+      <div class="brand-section">
+        <div class="brand-icon">
+          <i class="fa-solid fa-file-pdf"></i>
+        </div>
+        <div class="brand-title">
+          <h1>Handwritten PDF to Report Converter</h1>
+          <p>Instant AI Conversion • Direct Camera Capture • Excel & PDF Export • WhatsApp Share</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-theme-toggle" class="btn btn-outline" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
+          <i class="fa-solid fa-sun"></i>
+        </button>
+        <button id="btn-api-key" class="btn btn-outline" title="Gemini AI Key Settings" aria-label="Gemini AI Key Settings" style="border-color: #f59e0b; color: #fbbf24;">
+          <i class="fa-solid fa-key"></i> AI Key
+        </button>
+        <button id="btn-monthly-matrix" class="btn btn-outline" title="Monthly Attendance & Payroll Matrix" aria-label="Monthly Attendance & Payroll Matrix" style="border-color: #818cf8; color: #a5b4fc;">
+          <i class="fa-solid fa-calendar-days"></i> Monthly Matrix
+        </button>
+        <button id="btn-master-dir" class="btn btn-outline" title="Master Staff Directory" aria-label="Master Staff Directory" style="border-color: #06b6d4; color: #67e8f9;">
+          <i class="fa-solid fa-address-book"></i> Staff Directory
+        </button>
+        <button id="btn-backup-export" class="btn btn-outline" title="Cloud / File Backup & Restore" aria-label="Cloud / File Backup & Restore">
+          <i class="fa-solid fa-cloud-arrow-down"></i> Backup / Restore
+        </button>
+        <button id="btn-install-app" class="btn btn-outline" style="display: none; border-color: #10b981; color: #34d399;">
+          <i class="fa-solid fa-mobile-screen-button"></i> Install Mobile App
+        </button>
+        <button id="btn-clear-all" class="btn btn-outline">
+          <i class="fa-solid fa-arrows-rotate"></i> Reset Document
+        </button>
+        <button id="btn-copy-image" class="btn btn-outline" title="Copy high-res report image to clipboard for instant pasting into WhatsApp Web">
+          <i class="fa-solid fa-image"></i> Copy Report Image
+        </button>
+        <button id="btn-export-csv" class="btn btn-outline" title="Export report data to Excel/CSV format">
+          <i class="fa-solid fa-file-excel"></i> Export Excel / CSV
+        </button>
+        <button id="btn-export-pdf" class="btn btn-primary">
+          <i class="fa-solid fa-file-pdf"></i> Download PDF Report
+        </button>
+        <button id="btn-whatsapp-share" class="btn btn-whatsapp">
+          <i class="fa-brands fa-whatsapp"></i> Share on WhatsApp
+        </button>
+      </div>
+    </header>
+
+    <!-- Dashboard Stat Cards -->
+    <section class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+      <div class="stat-card">
+        <div class="stat-icon primary">
+          <i class="fa-solid fa-users"></i>
+        </div>
+        <div class="stat-info">
+          <h3>Total Staff</h3>
+          <div class="value" id="stat-total">0</div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon success">
+          <i class="fa-solid fa-user-check"></i>
+        </div>
+        <div class="stat-info">
+          <h3>Present Staff</h3>
+          <div class="value" id="stat-present">0</div>
+        </div>
+      </div>
+
+      <div class="stat-card alert-card">
+        <div class="stat-icon danger">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <div class="stat-info">
+          <h3>Shortfall (<span id="stat-target-label">9h</span>)</h3>
+          <div class="value" id="stat-shortfall" style="color: #fca5a5;">0</div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon amber">
+          <i class="fa-solid fa-clock"></i>
+        </div>
+        <div class="stat-info">
+          <h3>Late IN</h3>
+          <div class="value" id="stat-late-in" style="color: #fcd34d;">0</div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon danger" style="background: rgba(239, 68, 68, 0.3);">
+          <i class="fa-solid fa-user-xmark"></i>
+        </div>
+        <div class="stat-info">
+          <h3>Absentees</h3>
+          <div class="value" id="stat-absent" style="color: #f87171;">0</div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(99, 102, 241, 0.15); color: #818cf8;">
+          <i class="fa-solid fa-hourglass-half"></i>
+        </div>
+        <div class="stat-info">
+          <h3>Avg Working Hours</h3>
+          <div class="value" id="stat-avg-hours">0:00:00</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Upload Handwritten PDF Section -->
+    <section id="upload-section" class="upload-section">
+      <div class="upload-icon">
+        <i class="fa-solid fa-file-invoice"></i>
+      </div>
+      <h2 class="upload-title">Upload Handwritten Attendance Register (PDFs, Images, or Direct Camera Snap)</h2>
+      <p class="upload-desc">Select one or multiple handwritten attendance PDFs/photos, or snap a register page directly using your mobile camera!</p>
+      
+      <div class="upload-buttons">
+        <label for="file-input" class="btn btn-primary" style="font-size: 1rem; padding: 12px 24px;">
+          <i class="fa-solid fa-file-arrow-up"></i> Upload PDFs / Photos (Select Multiple)
+        </label>
+        <input type="file" id="file-input" accept="image/*,.pdf,.jpg,.jpeg,.png,.webp,.jfif,.bmp,.tif,.tiff,.heic" multiple style="display: none;" aria-label="Upload attendance document">
+
+        <label for="camera-input" class="btn btn-outline" style="font-size: 1rem; padding: 12px 24px;">
+          <i class="fa-solid fa-camera"></i> Snap Photos with Camera (Multiple)
+        </label>
+        <input type="file" id="camera-input" accept="image/*" capture="environment" multiple style="display: none;">
+      </div>
+
+      <div id="ocr-status" style="margin-top: 14px; font-size: 0.875rem; color: var(--accent-primary); display: none;">
+        <i class="fa-solid fa-spinner fa-spin"></i> <span id="ocr-msg">Reading Handwritten Document...</span>
+      </div>
+    </section>
+
+    <!-- Document Preview & Rotation Modal -->
+    <div id="doc-preview-modal" class="modal-overlay" style="display: none;">
+      <div class="modal-card" style="max-width: 800px;">
+        <div class="modal-header">
+          <h2><i class="fa-solid fa-rotate"></i> Document Preview & Orientation Check</h2>
+          <button id="btn-close-doc-modal" class="action-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 12px;">
+          If your handwritten page is sideways, click <b>Rotate 90°</b> so it is upright before converting to report!
+        </p>
+
+        <div style="background: #0f172a; padding: 12px; border-radius: 8px; text-align: center; max-height: 440px; overflow: auto; margin-bottom: 16px;">
+          <canvas id="preview-canvas" style="max-width: 100%; height: auto; border: 1px solid var(--border-color); border-radius: 4px;"></canvas>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button id="btn-rotate-left" class="btn btn-outline"><i class="fa-solid fa-rotate-left"></i> Rotate Left 90°</button>
+            <button id="btn-rotate-right" class="btn btn-outline"><i class="fa-solid fa-rotate-right"></i> Rotate Right 90°</button>
+            <span id="page-indicator" style="font-size: 0.8125rem; color: var(--text-muted); margin-left: 8px;">Page 1 of 1</span>
+          </div>
+
+          <div style="display: flex; gap: 8px;">
+            <button id="btn-prev-page" class="btn btn-outline" style="display: none;"><i class="fa-solid fa-chevron-left"></i> Prev Page</button>
+            <button id="btn-next-page" class="btn btn-outline" style="display: none;">Next Page <i class="fa-solid fa-chevron-right"></i></button>
+            <button id="btn-scan-confirmed" class="btn btn-success"><i class="fa-solid fa-wand-magic-sparkles"></i> Convert Document to Report</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Discrepancy & Alert Center -->
+    <div id="discrepancy-panel" style="display: none; background: #1e293b; border: 1px solid #d97706; border-radius: var(--radius-md); padding: 18px 24px; margin-bottom: 24px; box-shadow: var(--shadow-md);">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+        <h2 style="font-family: var(--font-heading); font-size: 1.125rem; font-weight: 700; color: #fbbf24; display: flex; align-items: center; gap: 8px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Discrepancy & Alert Center
+        </h2>
+        <span style="font-size: 0.75rem; font-weight: 700; background: #78350f; color: #fef3c7; padding: 3px 8px; border-radius: 12px;" id="discrepancy-badge">0 Alerts</span>
+      </div>
+      <div id="discrepancy-list" style="display: flex; flex-direction: column; gap: 10px;">
+        <!-- Dynamic Alert Rows -->
+      </div>
+    </div>
+
+    <!-- Controls Bar with Shift Customization & Filters -->
+    <section class="controls-bar">
+      <div class="filter-group">
+        <span style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted); margin-right: 4px;">Filter:</span>
+        <button class="filter-chip active" data-filter="all">All (<span id="count-all">0</span>)</button>
+        <button class="filter-chip chip-shortfall" data-filter="shortfall">Short Hours [<span id="count-shortfall">0</span>]</button>
+        <button class="filter-chip chip-latein" data-filter="latein">Late IN (<span id="count-latein">0</span>)</button>
+        <button class="filter-chip chip-absent" data-filter="absent">Absentees (<span id="count-absent">0</span>)</button>
+        <button class="filter-chip" data-filter="notpunched">Not Punched (<span id="count-notpunched">0</span>)</button>
+        <button class="filter-chip" data-filter="full">Full Hours (<span id="count-full">0</span>)</button>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <!-- Shift Target Selector -->
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <label for="select-target-hours" style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);">Shift Target:</label>
+          <select id="select-target-hours" style="padding: 6px 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem;">
+            <option value="540" selected>9.0 Hours (Standard)</option>
+            <option value="480">8.0 Hours</option>
+            <option value="510">8.5 Hours</option>
+            <option value="600">10.0 Hours</option>
+          </select>
+        </div>
+
+        <!-- Expected IN Threshold -->
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <label for="select-expected-in" style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);">Expected IN:</label>
+          <select id="select-expected-in" style="padding: 6px 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem;">
+            <option value="600">10:00 AM</option>
+            <option value="615" selected>10:15 AM (Default)</option>
+            <option value="630">10:30 AM</option>
+            <option value="660">11:00 AM</option>
+          </select>
+        </div>
+
+        <!-- Grace Period Selector -->
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <label for="select-grace-mins" style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);">Grace Period:</label>
+          <select id="select-grace-mins" style="padding: 6px 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem;">
+            <option value="0" selected>0 Mins</option>
+            <option value="15">15 Mins</option>
+            <option value="30">30 Mins</option>
+          </select>
+        </div>
+
+        <!-- Date Field -->
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <label for="input-report-date" style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);">Date:</label>
+          <input type="text" id="input-report-date" placeholder="e.g. 31/07/2026 FRIDAY" style="padding: 6px 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem; width: 160px;">
+        </div>
+
+        <!-- Saved Reports History Dropdown -->
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <label for="select-saved-reports" style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);">Saved Reports:</label>
+          <select id="select-saved-reports" style="padding: 6px 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem; min-width: 140px;">
+            <option value="">-- Select Date --</option>
+          </select>
+        </div>
+
+        <button id="btn-add-staff" class="btn btn-outline" style="padding: 6px 12px; font-size: 0.8125rem;">
+          <i class="fa-solid fa-plus"></i> Add Row
+        </button>
+        <div class="search-box">
+          <i class="fa-solid fa-magnifying-glass search-icon"></i>
+          <input type="text" id="search-input" placeholder="Search staff name..." aria-label="Search staff by name">
+        </div>
+      </div>
+    </section>
+
+    <!-- Extracted Report Preview Table -->
+    <main class="table-card" id="report-table-card">
+      <div class="table-wrapper">
+        <table class="attendance-table" id="attendance-table">
+          <thead>
+            <tr>
+              <th>SL NO</th>
+              <th style="text-align: left;">NAME</th>
+              <th>IN</th>
+              <th>1st Out</th>
+              <th>1st In</th>
+              <th>2nd Out</th>
+              <th>2nd In</th>
+              <th>3rd Out</th>
+              <th>3rd In</th>
+              <th>Final Out</th>
+              <th>Total Working Hours</th>
+              <th>Shortfall</th>
+              <th>Remarks</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <!-- Rows rendered dynamically -->
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <!-- Edit Employee Modal -->
+  <div id="edit-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="modal-title">Edit Staff Record</h2>
+        <button id="btn-close-modal" class="action-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="edit-form">
+        <input type="hidden" id="edit-id">
+        <div class="form-grid">
+          <div class="form-group full-width">
+            <label for="edit-name">Staff Name</label>
+            <input type="text" id="edit-name" required placeholder="e.g. STAFF MEMBER 01">
+          </div>
+
+          <div class="form-group">
+            <label for="edit-in">Master Punch IN</label>
+            <input type="text" id="edit-in" placeholder="10:44 or AB">
+          </div>
+
+          <div class="form-group">
+            <label for="edit-finalOut">Master Punch Out (Final Out)</label>
+            <input type="text" id="edit-finalOut" placeholder="07:30:00 PM or NOTPUNCHED">
+          </div>
+
+          <div class="form-group">
+            <label for="edit-out1">1st Out</label>
+            <input type="text" id="edit-out1" placeholder="02:00:00 PM">
+          </div>
+
+          <div class="form-group">
+            <label for="edit-in1">1st In</label>
+            <input type="text" id="edit-in1" placeholder="02:50:00 PM">
+          </div>
+
+          <div class="form-group">
+            <label for="edit-out2">2nd Out</label>
+            <input type="text" id="edit-out2" placeholder="05:26:00 PM">
+          </div>
+
+          <div class="form-group">
+            <label for="edit-in2">2nd In</label>
+            <input type="text" id="edit-in2" placeholder="05:52:00 PM">
+          </div>
+
+          <div class="form-group">
+            <label for="edit-out3">3rd Out</label>
+            <input type="text" id="edit-out3" placeholder="06:30:00 PM">
+          </div>
+
+          <div class="form-group">
+            <label for="edit-in3">3rd In</label>
+            <input type="text" id="edit-in3" placeholder="06:45:00 PM">
+          </div>
+
+          <div class="form-group full-width">
+            <label for="edit-target-minutes">Individual Shift Target Override</label>
+            <select id="edit-target-minutes" style="padding: 8px 12px; border-radius: var(--radius-sm); background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.875rem; width: 100%;">
+              <option value="">Use Global Default</option>
+              <option value="540">9.0 Hours (Standard)</option>
+              <option value="480">8.0 Hours</option>
+              <option value="510">8.5 Hours</option>
+              <option value="600">10.0 Hours</option>
+              <option value="270">4.5 Hours (Half Day)</option>
+              <option value="240">4.0 Hours</option>
+            </select>
+          </div>
+
+          <div class="form-group full-width">
+            <label for="edit-remarks">Manager Remarks / Reason Notes</label>
+            <input type="text" id="edit-remarks" placeholder="e.g. Medical Leave, Approved Half Day, Late Traffic, etc.">
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 10px;">
+          <button type="button" id="btn-cancel-modal" class="btn btn-outline">Cancel</button>
+          <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Save Entry</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Master Staff Directory Modal -->
+  <div id="master-dir-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 650px;">
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-address-book" style="color: #67e8f9;"></i> Master Staff Directory & AI Fuzzy Matcher</h2>
+        <button id="btn-close-dir-modal" class="action-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <p style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 14px;">
+        Define official staff names. Any AI OCR scan automatically corrects minor handwritten spelling variations against this master list!
+      </p>
+
+      <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+        <input type="text" id="input-new-staff-name" placeholder="Enter official staff name (e.g. STAFF MEMBER 01)..." style="flex: 1; padding: 8px 12px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.875rem;">
+        <button id="btn-add-dir-staff" class="btn btn-primary" style="padding: 8px 14px;"><i class="fa-solid fa-plus"></i> Add Name</button>
+      </div>
+
+      <div id="dir-staff-list" style="max-height: 260px; overflow-y: auto; background: #0f172a; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
+        <!-- Dynamic Staff Chips -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Monthly Attendance & Payroll Matrix Modal -->
+  <div id="monthly-matrix-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 1050px; width: 95%;">
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-calendar-days" style="color: #a5b4fc;"></i> Monthly Attendance & Payroll Matrix</h2>
+        <button id="btn-close-matrix-modal" class="action-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; background: #0f172a; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <label style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);">Daily Wage Rate (₹):</label>
+          <input type="number" id="input-daily-rate" value="500" style="width: 90px; padding: 5px 8px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem;">
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <label style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);">Lateness Penalty Rule:</label>
+          <select id="select-late-rule" style="padding: 5px 8px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem;">
+            <option value="3">Every 3 Lates = ½ Day Pay Deduction</option>
+            <option value="2">Every 2 Lates = ½ Day Pay Deduction</option>
+            <option value="0">No Lateness Penalty</option>
+          </select>
+        </div>
+
+        <button id="btn-export-matrix-csv" class="btn btn-success" style="padding: 6px 12px; font-size: 0.8125rem;">
+          <i class="fa-solid fa-file-excel"></i> Export Monthly Excel
+        </button>
+      </div>
+
+      <div style="overflow-x: auto; max-height: 440px; background: #0f172a; border-radius: 8px; border: 1px solid var(--border-color);">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.8125rem;" id="matrix-table">
+          <thead>
+            <tr style="background: #1e293b; color: var(--text-main); border-bottom: 2px solid var(--border-color); text-align: center;">
+              <th style="padding: 10px; text-align: left; position: sticky; left: 0; background: #1e293b; z-index: 2;">Staff Name</th>
+              <th style="padding: 10px;">Present</th>
+              <th style="padding: 10px;">Late</th>
+              <th style="padding: 10px;">Shortfall</th>
+              <th style="padding: 10px;">Absent</th>
+              <th style="padding: 10px;">Late Penalty</th>
+              <th style="padding: 10px;">Net Payable Days</th>
+              <th style="padding: 10px;">Est. Salary (₹)</th>
+            </tr>
+          </thead>
+          <tbody id="matrix-table-body">
+            <!-- Rendered dynamically -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="backup-file-input" accept=".json" style="display: none;">
+
+  <!-- WhatsApp Share Modal -->
+  <div id="whatsapp-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2><i class="fa-brands fa-whatsapp" style="color: #25d366;"></i> Share Report on WhatsApp</h2>
+        <button id="btn-close-wa-modal" class="action-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 12px;">
+        1. Click <b>"Download PDF Report"</b> or <b>"Copy Report Image"</b>.<br>
+        2. Click <b>"Open WhatsApp"</b> to share the summary message and paste your report!
+      </p>
+
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label>WhatsApp Summary Message:</label>
+        <textarea id="wa-text-preview" rows="10" style="width: 100%; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px; border-radius: 8px; font-family: monospace; font-size: 0.8125rem;"></textarea>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 12px;">
+        <button id="btn-wa-copy" class="btn btn-outline"><i class="fa-solid fa-copy"></i> Copy Summary Text</button>
+        <button id="btn-wa-launch" class="btn btn-whatsapp"><i class="fa-brands fa-whatsapp"></i> Open WhatsApp Web / App</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Multi-Photo Camera Gallery Modal -->
+  <div id="camera-gallery-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 700px;">
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-camera" style="color: var(--accent-primary);"></i> Multi-Photo Register Scanner</h2>
+        <button id="btn-close-gallery-modal" class="action-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 16px;">
+        Captured <b id="gallery-count-text">0 pages</b>. Snap additional pages of your handwritten register or process them all with Gemini AI Vision!
+      </p>
+
+      <div id="gallery-thumbnails-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; max-height: 320px; overflow-y: auto; background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 20px;">
+        <!-- Thumbnails inserted dynamically -->
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <label for="camera-append-input" class="btn btn-outline">
+          <i class="fa-solid fa-plus"></i> Snap Another Page
+        </label>
+        <input type="file" id="camera-append-input" accept="image/*" capture="environment" style="display: none;">
+
+        <div style="display: flex; gap: 10px;">
+          <button id="btn-clear-gallery" class="btn btn-outline" style="color: #ef4444;"><i class="fa-solid fa-trash-can"></i> Clear All</button>
+          <button id="btn-process-gallery" class="btn btn-success"><i class="fa-solid fa-wand-magic-sparkles"></i> Process All Pages</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
