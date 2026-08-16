@@ -378,6 +378,13 @@ body {
   margin-bottom: 16px;
 }
 
+.controls-grid {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .filter-group {
   display: flex;
   align-items: center;
@@ -648,6 +655,43 @@ body {
   font-size: 0.875rem;
 }
 
+/* Sticky first 2 columns for easy mobile horizontal swipe */
+.attendance-table th:nth-child(1),
+.attendance-table td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  background: #0f172a;
+  z-index: 6;
+  min-width: 42px;
+}
+
+.attendance-table th:nth-child(2),
+.attendance-table td:nth-child(2) {
+  position: sticky;
+  left: 42px;
+  background: #0f172a;
+  z-index: 6;
+  border-right: 1px solid var(--border-color);
+  min-width: 130px;
+}
+
+.attendance-table tbody tr.row-shortfall td:nth-child(1),
+.attendance-table tbody tr.row-shortfall td:nth-child(2) {
+  background: #3b1111 !important;
+}
+
+[data-theme="light"] .attendance-table th:nth-child(1),
+[data-theme="light"] .attendance-table td:nth-child(1),
+[data-theme="light"] .attendance-table th:nth-child(2),
+[data-theme="light"] .attendance-table td:nth-child(2) {
+  background: #ffffff;
+}
+
+[data-theme="light"] .attendance-table tbody tr.row-shortfall td:nth-child(1),
+[data-theme="light"] .attendance-table tbody tr.row-shortfall td:nth-child(2) {
+  background: #fee2e2 !important;
+}
+
 /* Toast Notifications */
 .toast-container {
   position: fixed;
@@ -681,22 +725,262 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Responsive adjustments */
+/* ==========================================================================
+   MOBILE-FIRST UI/UX OPTIMIZATIONS (Smartphones & Tablets <= 768px)
+   ========================================================================== */
 @media (max-width: 768px) {
+  .app-container {
+    padding: 12px 10px calc(40px + env(safe-area-inset-bottom)) 10px;
+  }
+
+  /* Header & Brand */
   .app-header {
     flex-direction: column;
     align-items: flex-start;
+    padding: 14px 16px;
+    gap: 14px;
+    margin-bottom: 16px;
   }
+
+  .brand-section {
+    width: 100%;
+    gap: 12px;
+  }
+
+  .brand-icon {
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+
+  .brand-title h1 {
+    font-size: 1.2rem;
+    line-height: 1.25;
+  }
+
+  .brand-title p {
+    font-size: 0.75rem;
+    line-height: 1.3;
+    margin-top: 2px;
+  }
+
+  /* Action Buttons Grid on Mobile */
   .header-actions {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
     width: 100%;
   }
+
   .header-actions .btn {
-    flex: 1;
+    padding: 9px 8px;
+    font-size: 0.78rem;
+    gap: 6px;
+    width: 100%;
+    justify-content: center;
+    white-space: nowrap;
   }
+
+  #btn-theme-toggle {
+    grid-column: span 1;
+  }
+
+  #btn-api-key {
+    grid-column: span 1;
+  }
+
+  #btn-whatsapp-share,
+  #btn-export-pdf {
+    grid-column: span 2;
+    font-size: 0.85rem;
+    padding: 11px 12px;
+  }
+
+  /* 2x3 Compact Stat Cards Grid */
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .stat-card {
+    padding: 10px 12px;
+    gap: 10px;
+    border-radius: var(--radius-sm);
+  }
+
+  .stat-icon {
+    width: 34px;
+    height: 34px;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+
+  .stat-info h3 {
+    font-size: 0.65rem;
+  }
+
+  .stat-info .value {
+    font-size: 1.15rem;
+  }
+
+  /* Upload Section Full Width Touch Targets */
+  .upload-section {
+    padding: 20px 14px;
+    margin-bottom: 16px;
+    border-radius: var(--radius-md);
+  }
+
+  .upload-icon {
+    font-size: 30px;
+    margin-bottom: 8px;
+  }
+
+  .upload-title {
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+  }
+
+  .upload-desc {
+    font-size: 0.78rem;
+    margin-bottom: 14px;
+  }
+
+  .upload-buttons {
+    flex-direction: column;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .upload-buttons .btn {
+    width: 100%;
+    padding: 12px 14px !important;
+    font-size: 0.875rem !important;
+    justify-content: center;
+  }
+
+  /* Horizontal Swipeable Filter Chips */
+  .controls-bar {
+    padding: 12px;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .filter-group {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 6px;
+    width: 100%;
+    scrollbar-width: none;
+  }
+
+  .filter-group::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filter-chip {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 5px 11px;
+    font-size: 0.75rem;
+  }
+
+  /* Dropdowns Grid on Mobile */
+  .controls-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    width: 100%;
+  }
+
+  .controls-grid > div {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 3px !important;
+    width: 100%;
+  }
+
+  .controls-grid select,
+  .controls-grid input {
+    width: 100% !important;
+    font-size: 0.78rem !important;
+  }
+
+  #btn-add-staff {
+    grid-column: span 2;
+    justify-content: center;
+    padding: 9px 12px;
+  }
+
+  .search-box {
+    grid-column: span 2;
+    width: 100%;
+    min-width: 100%;
+  }
+
+  /* Table Smooth Touch Scroll */
+  .table-wrapper {
+    -webkit-overflow-scrolling: touch;
+    max-height: 520px;
+  }
+
+  .attendance-table {
+    font-size: 0.75rem;
+  }
+
+  .attendance-table th,
+  .attendance-table td {
+    padding: 8px 6px;
+  }
+
+  /* Mobile Modals */
+  .modal-overlay {
+    padding: 10px;
+    align-items: flex-end;
+  }
+
+  .modal-card {
+    padding: 16px;
+    max-height: 85vh;
+    overflow-y: auto;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    width: 100%;
+  }
+
+  .modal-header h2 {
+    font-size: 1.05rem;
+  }
+
   .form-grid {
     grid-template-columns: 1fr;
+    gap: 10px;
   }
+
   .form-group.full-width {
     grid-column: span 1;
   }
+
+  .form-group input,
+  .form-group select {
+    padding: 9px 10px;
+    font-size: 0.85rem;
+  }
+
+  /* Toast Center on Mobile */
+  .toast-container {
+    left: 14px;
+    right: 14px;
+    bottom: 16px;
+  }
+
+  .toast {
+    padding: 10px 14px;
+    font-size: 0.8125rem;
+    justify-content: center;
+  }
 }
+
