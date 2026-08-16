@@ -1,6 +1,6 @@
 {
-  "name": "Staff Attendance Tracker",
-  "short_name": "Attendance",
+  "name": "Staff Attendance Tracking App",
+  "short_name": "Attendance Tracking",
   "description": "Convert handwritten daily attendance registers into styled PDF and Excel reports with Gemini AI Vision.",
   "start_url": "./index.html",
   "display": "standalone",

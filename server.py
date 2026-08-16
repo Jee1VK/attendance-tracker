@@ -221,7 +221,7 @@ if __name__ == '__main__':
     try:
         with socketserver.TCPServer(("0.0.0.0", PORT), CustomHandler) as httpd:
             print(f"============================================================")
-            print(f" Attendance Tracker Server Live!")
+            print(f" Staff Attendance Tracking App Server Live!")
             print(f" Root Directory:      {DIRECTORY}")
             print(f" Local PC Access:     http://localhost:{PORT}")
             print(f" Network IP Access:   http://{local_ip}:{PORT}")
