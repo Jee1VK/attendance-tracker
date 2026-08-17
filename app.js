@@ -8,9 +8,9 @@ let currentFilter = 'all';
 let searchQuery = '';
 
 // Shift Target, Grace & Expected IN Settings
-let targetMinutes = 540; // 9 hours
+let targetMinutes = 570; // 9.5 hours standard
 let graceMinutes = 0;
-let expectedInMinutes = 615; // 10:15 AM
+let expectedInMinutes = 600; // 10:00 AM default
 let reportDate = new Date().toLocaleDateString('en-GB');
 
 // Document Preview State (Single File)
@@ -280,7 +280,27 @@ function setupEventListeners() {
   }));
 
   selectTargetHours.addEventListener('change', (e) => {
-    targetMinutes = parseInt(e.target.value, 10);
+    if (e.target.value === 'custom') {
+      const currentHrs = (targetMinutes / 60).toFixed(1);
+      const customInput = prompt("⏱️ Enter custom shift target in hours (e.g. 9.5, 8.5, 10, 12):", currentHrs);
+      if (customInput !== null && !isNaN(parseFloat(customInput)) && parseFloat(customInput) > 0) {
+        const hrs = parseFloat(customInput);
+        targetMinutes = Math.round(hrs * 60);
+        let opt = selectTargetHours.querySelector(`option[value="${targetMinutes}"]`);
+        if (!opt) {
+          opt = document.createElement('option');
+          opt.value = targetMinutes;
+          opt.textContent = `${hrs.toFixed(1)} Hours (Custom)`;
+          selectTargetHours.insertBefore(opt, selectTargetHours.lastElementChild);
+        }
+        selectTargetHours.value = targetMinutes;
+      } else {
+        selectTargetHours.value = targetMinutes;
+        return;
+      }
+    } else {
+      targetMinutes = parseInt(e.target.value, 10);
+    }
     renderApp();
     saveRosterToCache();
     showToast(`Shift target updated to ${(targetMinutes / 60).toFixed(1)} hours`, "info");
@@ -294,7 +314,42 @@ function setupEventListeners() {
   });
 
   selectExpectedIn.addEventListener('change', (e) => {
-    expectedInMinutes = parseInt(e.target.value, 10);
+    if (e.target.value === 'custom') {
+      let curHrs = Math.floor(expectedInMinutes / 60);
+      const curMins = expectedInMinutes % 60;
+      const curAmpm = curHrs >= 12 ? 'PM' : 'AM';
+      if (curHrs > 12) curHrs -= 12;
+      if (curHrs === 0) curHrs = 12;
+      const customTime = prompt("⏰ Enter custom Expected IN time (e.g. 10:00 AM, 09:30 AM, 10:45):", `${curHrs}:${curMins < 10 ? '0' + curMins : curMins} ${curAmpm}`);
+      if (customTime) {
+        const parsed = parseTimeToMinutes(customTime);
+        if (parsed !== null && parsed > 0) {
+          expectedInMinutes = Math.round(parsed);
+          let opt = selectExpectedIn.querySelector(`option[value="${expectedInMinutes}"]`);
+          if (!opt) {
+            opt = document.createElement('option');
+            opt.value = expectedInMinutes;
+            let hrs = Math.floor(expectedInMinutes / 60);
+            const mins = expectedInMinutes % 60;
+            const ampm = hrs >= 12 ? 'PM' : 'AM';
+            if (hrs > 12) hrs -= 12;
+            if (hrs === 0) hrs = 12;
+            opt.textContent = `${hrs}:${mins < 10 ? '0' + mins : mins} ${ampm} (Custom)`;
+            selectExpectedIn.insertBefore(opt, selectExpectedIn.lastElementChild);
+          }
+          selectExpectedIn.value = expectedInMinutes;
+        } else {
+          showToast("Invalid time format entered.", "info");
+          selectExpectedIn.value = expectedInMinutes;
+          return;
+        }
+      } else {
+        selectExpectedIn.value = expectedInMinutes;
+        return;
+      }
+    } else {
+      expectedInMinutes = parseInt(e.target.value, 10);
+    }
     renderApp();
     saveRosterToCache();
     let hrs = Math.floor(expectedInMinutes / 60);
@@ -657,6 +712,28 @@ function setupEventListeners() {
     if (cameraInput) cameraInput.value = '';
   });
 
+  const editTargetSelect = document.getElementById('edit-target-minutes');
+  if (editTargetSelect) {
+    editTargetSelect.addEventListener('change', (e) => {
+      if (e.target.value === 'custom') {
+        const customHrs = prompt("⏱️ Enter custom individual shift target in hours (e.g. 9.5, 7.5, 12):", "9.5");
+        if (customHrs && !isNaN(parseFloat(customHrs)) && parseFloat(customHrs) > 0) {
+          const mins = Math.round(parseFloat(customHrs) * 60);
+          let opt = editTargetSelect.querySelector(`option[value="${mins}"]`);
+          if (!opt) {
+            opt = document.createElement('option');
+            opt.value = mins;
+            opt.textContent = `${parseFloat(customHrs).toFixed(1)} Hours (Custom)`;
+            editTargetSelect.insertBefore(opt, editTargetSelect.lastElementChild);
+          }
+          editTargetSelect.value = mins;
+        } else {
+          editTargetSelect.value = "";
+        }
+      }
+    });
+  }
+
   document.getElementById('btn-close-modal').addEventListener('click', closeModal);
   document.getElementById('btn-cancel-modal').addEventListener('click', closeModal);
   editForm.addEventListener('submit', e => { e.preventDefault(); saveModalRecord(); });
@@ -873,7 +950,18 @@ function openEditModal(index) {
   
   const editTargetSelect = document.getElementById('edit-target-minutes');
   if (editTargetSelect) {
-    editTargetSelect.value = r.targetMinutes !== undefined && r.targetMinutes !== null ? String(r.targetMinutes) : "";
+    if (r.targetMinutes !== undefined && r.targetMinutes !== null) {
+      let opt = editTargetSelect.querySelector(`option[value="${r.targetMinutes}"]`);
+      if (!opt) {
+        opt = document.createElement('option');
+        opt.value = r.targetMinutes;
+        opt.textContent = `${(r.targetMinutes / 60).toFixed(1)} Hours (Custom)`;
+        editTargetSelect.insertBefore(opt, editTargetSelect.lastElementChild);
+      }
+      editTargetSelect.value = String(r.targetMinutes);
+    } else {
+      editTargetSelect.value = "";
+    }
   }
   
   editModal.style.display = 'flex';

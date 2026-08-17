@@ -126,7 +126,7 @@
           <i class="fa-solid fa-triangle-exclamation"></i>
         </div>
         <div class="stat-info">
-          <h3>Shortfall (<span id="stat-target-label">9h</span>)</h3>
+          <h3>Shortfall (<span id="stat-target-label">9.5h</span>)</h3>
           <div class="value" id="stat-shortfall" style="color: #fca5a5;">0</div>
         </div>
       </div>
@@ -249,10 +249,15 @@
         <div style="display: flex; align-items: center; gap: 6px;">
           <label for="select-target-hours" style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);">Shift Target:</label>
           <select id="select-target-hours" style="padding: 6px 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem;">
-            <option value="540" selected>9.0 Hours (Standard)</option>
-            <option value="480">8.0 Hours</option>
+            <option value="570" selected>9.5 Hours (Standard)</option>
+            <option value="540">9.0 Hours</option>
             <option value="510">8.5 Hours</option>
+            <option value="480">8.0 Hours</option>
             <option value="600">10.0 Hours</option>
+            <option value="630">10.5 Hours</option>
+            <option value="660">11.0 Hours</option>
+            <option value="720">12.0 Hours</option>
+            <option value="custom">⚙️ Custom Hours...</option>
           </select>
         </div>
 
@@ -260,10 +265,14 @@
         <div style="display: flex; align-items: center; gap: 6px;">
           <label for="select-expected-in" style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);">Expected IN:</label>
           <select id="select-expected-in" style="padding: 6px 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem;">
-            <option value="600">10:00 AM</option>
-            <option value="615" selected>10:15 AM (Default)</option>
+            <option value="540">09:00 AM</option>
+            <option value="570">09:30 AM</option>
+            <option value="585">09:45 AM</option>
+            <option value="600" selected>10:00 AM (Default)</option>
+            <option value="615">10:15 AM</option>
             <option value="630">10:30 AM</option>
             <option value="660">11:00 AM</option>
+            <option value="custom">⚙️ Custom Time...</option>
           </select>
         </div>
 
@@ -389,13 +398,16 @@
           <div class="form-group full-width">
             <label for="edit-target-minutes">Individual Shift Target Override</label>
             <select id="edit-target-minutes" style="padding: 8px 12px; border-radius: var(--radius-sm); background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.875rem; width: 100%;">
-              <option value="">Use Global Default</option>
-              <option value="540">9.0 Hours (Standard)</option>
-              <option value="480">8.0 Hours</option>
+              <option value="">Use Global Default (9.5h)</option>
+              <option value="570">9.5 Hours (Standard)</option>
+              <option value="540">9.0 Hours</option>
               <option value="510">8.5 Hours</option>
+              <option value="480">8.0 Hours</option>
               <option value="600">10.0 Hours</option>
+              <option value="630">10.5 Hours</option>
               <option value="270">4.5 Hours (Half Day)</option>
               <option value="240">4.0 Hours</option>
+              <option value="custom">⚙️ Custom Hours...</option>
             </select>
           </div>
 

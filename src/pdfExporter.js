@@ -19,7 +19,7 @@ export function generateAttendancePDF(processedRecords, metrics, reportDate = ne
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
 
-  const shiftLabel = metrics.targetHoursLabel || '9.0 Hours';
+  const shiftLabel = metrics.targetHoursLabel || '9.5 Hours';
 
   // Header Banner
   doc.setFillColor(30, 41, 59); // Slate-800

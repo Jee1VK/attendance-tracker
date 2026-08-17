@@ -3,8 +3,8 @@
  * Handles time conversions, working hours, break deductions, customizable shift targets, grace periods, and Late IN tracking.
  */
 
-export const DEFAULT_TARGET_MINUTES = 9 * 60; // Default 9 hours = 540 mins
-export const DEFAULT_EXPECTED_IN_MINUTES = 10 * 60 + 15; // Default 10:15 AM = 615 mins
+export const DEFAULT_TARGET_MINUTES = 9.5 * 60; // Default 9.5 hours = 570 mins
+export const DEFAULT_EXPECTED_IN_MINUTES = 10 * 60; // Default 10:00 AM = 600 mins
 
 export function parseTimeToMinutes(timeStr) {
   if (!timeStr || typeof timeStr !== 'string') return null;
