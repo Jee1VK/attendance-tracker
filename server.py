@@ -105,29 +105,37 @@ def scan_with_gemini_vision(image_base64, mime_type='image/png'):
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
 
-    prompt = """You are an expert at reading handwritten daily staff attendance registers.
+    prompt = """You are an expert OCR vision AI specializing in reading and transcribing handwritten daily staff attendance register tables.
 
-Carefully examine this handwritten attendance register image and extract:
-1. "reportDate": The register date written at the top header (e.g. "31/07/2026 FRIDAY" or similar date text). If not found, put "".
-2. "records": A JSON array of all staff attendance entries in the register.
+CRITICAL INSTRUCTIONS:
+1. Scan the attendance register image row by row from top to bottom.
+2. Look at the "NAME" or "EMPLOYEE NAME" column (usually column 2).
+3. For every person / row:
+   - Carefully read and transcribe the EXACT REAL HANDWRITTEN NAME written in that row in UPPERCASE (e.g. "ANANDAMMA", "KUMAR", "RAMESH", "GEETHA", etc.).
+   - DO NOT output generic placeholders like "STAFF MEMBER" or "PERSON" - read the actual handwriting written in the image!
+   - Extract the Serial Number ("slNo").
+   - Extract Punch IN time ("in") - e.g. "10:01", "09:55", "10:44", "11:20", or "AB" if absent.
+   - Extract Break OUT/IN times ("out1", "in1", "out2", "in2", "out3", "in3") - e.g. "02:00:00 PM", "02:50:00 PM", or "" if empty.
+   - Extract Final Punch OUT time ("finalOut") - e.g. "07:30:00 PM", "09:30:00 PM", "NOTPUNCHED", or "AB".
+4. Extract the register header date into "reportDate" (e.g. "31/07/2026 FRIDAY" or whatever date is written at the top).
 
-For each staff entry:
-- slNo: Integer serial number
-- name: Full staff name (uppercase)
-- in: Punch IN time (e.g. "10:01", "10:44", or "AB")
-- out1: 1st break OUT time (e.g. "02:00:00 PM"). Leave "" if none.
-- in1: 1st break IN time. Leave "" if none.
-- out2: 2nd break OUT time. Leave "" if none.
-- in2: 2nd break IN time. Leave "" if none.
-- out3: 3rd break OUT time. Leave "" if none.
-- in3: 3rd break IN time. Leave "" if none.
-- finalOut: Punch OUT time (e.g. "07:30:00 PM", "NOTPUNCHED", or "AB").
-
-CRITICAL: Return ONLY a valid JSON object matching this schema:
+OUTPUT FORMAT:
+Return ONLY a valid JSON object matching this schema:
 {
   "reportDate": "31/07/2026 FRIDAY",
   "records": [
-    {"slNo":1,"name":"STAFF MEMBER","in":"10:01","out1":"02:00:00 PM","in1":"02:50:00 PM","out2":"","in2":"","out3":"","in3":"","finalOut":"07:30:00 PM"}
+    {
+      "slNo": 1,
+      "name": "REAL_NAME_FROM_IMAGE",
+      "in": "10:01",
+      "out1": "02:00:00 PM",
+      "in1": "02:50:00 PM",
+      "out2": "",
+      "in2": "",
+      "out3": "",
+      "in3": "",
+      "finalOut": "07:30:00 PM"
+    }
   ]
 }
 Return raw JSON only, no backticks, no markdown.

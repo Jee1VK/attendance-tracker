@@ -157,13 +157,45 @@ export function rotateCanvas(sourceCanvas, degrees) {
 export async function directGeminiVisionScan(base64Image) {
   const apiKey = getGeminiApiKey();
   if (!apiKey) {
-    throw new Error("Gemini API Key is required for standalone client-side vision scanning.");
+    throw new Error("Gemini API Key is required to scan your handwritten documents. Please click the 'AI Key' button at the top to enter your free key from https://aistudio.google.com/app/apikey");
   }
 
   const cleanBase64 = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  
+  const prompt = `You are an expert OCR vision AI specializing in reading and transcribing handwritten daily staff attendance register tables.
 
-  const prompt = `Extract handwritten daily staff attendance register JSON. Return ONLY JSON matching: {"reportDate":"31/07/2026 FRIDAY","records":[{"slNo":1,"name":"STAFF MEMBER","in":"10:01","out1":"02:00:00 PM","in1":"02:50:00 PM","out2":"","in2":"","out3":"","in3":"","finalOut":"07:30:00 PM"}]}`;
+CRITICAL INSTRUCTIONS:
+1. Scan the attendance register image row by row from top to bottom.
+2. Look at the "NAME" or "EMPLOYEE NAME" column (usually column 2).
+3. For every person / row:
+   - Carefully read and transcribe the EXACT REAL HANDWRITTEN NAME written in that row in UPPERCASE (e.g. "ANANDAMMA", "KUMAR", "RAMESH", "GEETHA", etc.).
+   - DO NOT output generic placeholders like "STAFF MEMBER" or "PERSON" - read the actual handwriting written in the image!
+   - Extract the Serial Number ("slNo").
+   - Extract Punch IN time ("in") - e.g. "10:01", "09:55", "10:44", "11:20", or "AB" if absent.
+   - Extract Break OUT/IN times ("out1", "in1", "out2", "in2", "out3", "in3") - e.g. "02:00:00 PM", "02:50:00 PM", or "" if empty.
+   - Extract Final Punch OUT time ("finalOut") - e.g. "07:30:00 PM", "09:30:00 PM", "NOTPUNCHED", or "AB".
+4. Extract the register header date into "reportDate" (e.g. "31/07/2026 FRIDAY" or whatever date is written at the top).
+
+OUTPUT FORMAT:
+Return ONLY a valid JSON object matching this schema:
+{
+  "reportDate": "31/07/2026 FRIDAY",
+  "records": [
+    {
+      "slNo": 1,
+      "name": "REAL_NAME_FROM_IMAGE",
+      "in": "10:01",
+      "out1": "02:00:00 PM",
+      "in1": "02:50:00 PM",
+      "out2": "",
+      "in2": "",
+      "out3": "",
+      "in3": "",
+      "finalOut": "07:30:00 PM"
+    }
+  ]
+}
+Return pure JSON only, without markdown code blocks, backticks, or any additional text.`;
 
   const payload = {
     contents: [{
@@ -175,27 +207,49 @@ export async function directGeminiVisionScan(base64Image) {
     generationConfig: { temperature: 0.1, maxOutputTokens: 8192 }
   };
 
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+  // Try gemini-2.0-flash first, fallback to gemini-1.5-flash
+  const models = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+  let lastError = null;
 
-  if (!resp.ok) {
-    if (resp.status === 400 || resp.status === 403) {
-      localStorage.removeItem('gemini_api_key');
-      throw new Error(`Invalid Gemini API Key (HTTP ${resp.status}). Key cleared.`);
+  for (const model of models) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!resp.ok) {
+        if (resp.status === 400 || resp.status === 403) {
+          localStorage.removeItem('gemini_api_key');
+          throw new Error(`Invalid Gemini API Key (HTTP ${resp.status}). Key has been reset. Please click 'AI Key' at the top to re-enter.`);
+        }
+        throw new Error(`Gemini Vision API (${model}) returned HTTP ${resp.status}`);
+      }
+
+      const data = await resp.json();
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      
+      let cleanText = rawText.trim();
+      if (cleanText.startsWith('```')) {
+        cleanText = cleanText.replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```$/, '').trim();
+      }
+
+      const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed.records) && parsed.records.length > 0) {
+          return { records: parsed.records, reportDate: parsed.reportDate || '' };
+        }
+      }
+    } catch (err) {
+      lastError = err;
+      console.warn(`Vision model ${model} failed, trying next...`, err);
     }
-    throw new Error(`Gemini Direct API error HTTP ${resp.status}`);
   }
 
-  const data = await resp.json();
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    const parsed = JSON.parse(jsonMatch[0]);
-    return { records: parsed.records || [], reportDate: parsed.reportDate || '' };
-  }
+  if (lastError) throw lastError;
   return { records: [], reportDate: '' };
 }
 
@@ -208,9 +262,11 @@ export async function processCanvasOCR(canvas, progressCallback) {
   const resized = resizeCanvasIfNeeded(canvas, 1600);
   const dataUrl = resized.toDataURL('image/jpeg', 0.85);
 
-  progressCallback && progressCallback(25, "Scanning document with Gemini AI Vision...");
+  progressCallback && progressCallback(25, "Scanning handwritten names with Gemini AI Vision...");
 
-  // Try backend proxy server first
+  let scanError = null;
+
+  // 1. Try backend proxy server first (if running with local Python server)
   try {
     const response = await fetch('/api/scan-document', {
       method: 'POST',
@@ -227,23 +283,28 @@ export async function processCanvasOCR(canvas, progressCallback) {
       }
     }
   } catch (err) {
-    console.warn("Backend server unreached, falling back to direct client-side Gemini Vision API scan...", err);
+    console.warn("Backend server unreached, using direct client-side Gemini Vision...", err);
   }
 
-  // Fallback to Standalone Direct Client-Side Gemini Vision Scan (Works on phone without PC!)
+  // 2. Direct Client-Side Gemini Vision Scan (Works on phone without PC!)
   try {
+    progressCallback && progressCallback(45, "Extracting real handwritten names using Gemini Vision...");
     const directRes = await directGeminiVisionScan(dataUrl);
     if (directRes && directRes.records && directRes.records.length > 0) {
-      progressCallback && progressCallback(100, `Gemini extracted ${directRes.records.length} staff records directly on phone!`);
+      progressCallback && progressCallback(100, `Extracted ${directRes.records.length} handwritten staff names from document!`);
       const uniqueRecords = deduplicateAndMergeRecords(directRes.records);
       return { records: uniqueRecords, reportDate: directRes.reportDate || '' };
     }
   } catch (err) {
-    console.error("Direct Gemini scan failed:", err);
+    scanError = err;
+    console.error("Direct Gemini scan error:", err);
   }
 
-  progressCallback && progressCallback(100, "Loaded register dataset.");
-  return { records: HANDWRITTEN_REGISTER_DATA, reportDate: "31/07/2026 FRIDAY" };
+  if (scanError) {
+    throw scanError;
+  }
+
+  throw new Error("No staff names could be detected in this image. Please ensure the document is clear, well-lit, and upright.");
 }
 
 /**
@@ -323,8 +384,7 @@ export async function processAllPdfPages(pdfArrayBuffer, rotation, progressCallb
   }
 
   if (rawRecords.length === 0) {
-    rawRecords = HANDWRITTEN_REGISTER_DATA;
-    detectedDate = "31/07/2026 FRIDAY";
+    throw new Error("No staff records could be extracted from the PDF. Please ensure your Gemini API Key is entered (click 'AI Key' at the top) and the PDF pages are clear.");
   }
 
   const finalRecords = deduplicateAndMergeRecords(rawRecords);
