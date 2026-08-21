@@ -201,7 +201,7 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
     contents: [{
       parts: [
         { text: prompt },
-        { inline_data: { mime_type: "image/jpeg", data: cleanBase64 } }
+        { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } }
       ]
     }],
     generationConfig: { temperature: 0.1, maxOutputTokens: 8192 }
@@ -221,11 +221,14 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
       });
 
       if (!resp.ok) {
-        if (resp.status === 400 || resp.status === 403) {
+        const errorData = await resp.json().catch(() => ({}));
+        const errMsg = errorData?.error?.message || `HTTP ${resp.status}`;
+        
+        if (resp.status === 403 || (resp.status === 400 && errMsg.toLowerCase().includes('api_key'))) {
           localStorage.removeItem('gemini_api_key');
-          throw new Error(`Invalid Gemini API Key (HTTP ${resp.status}). Key has been reset. Please click 'AI Key' at the top to re-enter.`);
+          throw new Error(`Invalid Gemini API Key: ${errMsg}. Please click 'AI Key' at the top to re-enter your key.`);
         }
-        throw new Error(`Gemini Vision API (${model}) returned HTTP ${resp.status}`);
+        throw new Error(`Gemini Vision API (${model}) error: ${errMsg}`);
       }
 
       const data = await resp.json();

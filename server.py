@@ -147,8 +147,8 @@ Return raw JSON only, no backticks, no markdown.
                 "parts": [
                     {"text": prompt},
                     {
-                        "inline_data": {
-                            "mime_type": mime_type,
+                        "inlineData": {
+                            "mimeType": mime_type,
                             "data": image_base64
                         }
                     }
