@@ -157,15 +157,155 @@ export function rotateCanvas(sourceCanvas, degrees) {
   return canvas;
 }
 
+export function parseJsonResponse(rawText) {
+  if (!rawText || typeof rawText !== 'string') return null;
+  let cleanText = rawText.trim();
+  if (cleanText.startsWith('```')) {
+    cleanText = cleanText.replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```$/, '').trim();
+  }
+
+  // 1. Direct JSON parse
+  try {
+    const direct = JSON.parse(cleanText);
+    if (direct) return direct;
+  } catch (e) {}
+
+  // 2. Match outermost JSON object { ... }
+  const objMatch = cleanText.match(/\{[\s\S]*\}/);
+  if (objMatch) {
+    try {
+      const parsed = JSON.parse(objMatch[0]);
+      if (parsed) return parsed;
+    } catch (e) {}
+  }
+
+  // 3. Match outermost JSON array [ ... ]
+  const arrMatch = cleanText.match(/\[[\s\S]*\]/);
+  if (arrMatch) {
+    try {
+      const parsed = JSON.parse(arrMatch[0]);
+      if (parsed) return parsed;
+    } catch (e) {}
+  }
+
+  return null;
+}
+
+export function normalizeExtractedRecords(parsedData) {
+  let rawList = [];
+  let reportDate = '';
+
+  if (Array.isArray(parsedData)) {
+    rawList = parsedData;
+  } else if (parsedData && typeof parsedData === 'object') {
+    reportDate = parsedData.reportDate || parsedData.report_date || parsedData.date || parsedData.Date || '';
+
+    // Check all common array keys returned by AI models
+    const candidates = [
+      parsedData.records,
+      parsedData.staff,
+      parsedData.employees,
+      parsedData.attendance,
+      parsedData.data,
+      parsedData.rows,
+      parsedData.entries,
+      parsedData.staff_records,
+      parsedData.attendance_records,
+      parsedData.items
+    ];
+
+    for (const c of candidates) {
+      if (Array.isArray(c) && c.length > 0) {
+        rawList = c;
+        break;
+      }
+    }
+
+    // Fallback: search for any array of objects inside the response
+    if (rawList.length === 0) {
+      for (const val of Object.values(parsedData)) {
+        if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
+          rawList = val;
+          break;
+        }
+      }
+    }
+  }
+
+  const normalized = [];
+  rawList.forEach((item, idx) => {
+    if (!item || typeof item !== 'object') return;
+
+    // Resolve name from any common naming convention
+    const rawName = item.name || item.Name || item.NAME ||
+                    item.staff_name || item.staffName || item.StaffName || item.STAFF_NAME ||
+                    item.employee_name || item.employeeName || item.EmployeeName || item.EMPLOYEE_NAME ||
+                    item.employee || item.Employee || item.EMPLOYEE ||
+                    item.staff || item.Staff || item.STAFF ||
+                    item.person || item.person_name || '';
+
+    let cleanName = String(rawName).trim().toUpperCase();
+    cleanName = cleanName.replace(/^[\d\s\.\-\(\)]+/, '').trim();
+    if (!cleanName || cleanName.length < 2) return;
+
+    // Resolve punch IN time
+    const inTime = item.in !== undefined ? item.in :
+                   item.In !== undefined ? item.In :
+                   item.IN !== undefined ? item.IN :
+                   item.in_time || item.inTime || item.InTime || item.IN_TIME ||
+                   item.punch_in || item.punchIn || item.PunchIn || item.PUNCH_IN ||
+                   item.check_in || item.checkIn || item.arrival || '';
+
+    // Resolve punch OUT time
+    const outTime = item.finalOut !== undefined ? item.finalOut :
+                    item.final_out !== undefined ? item.final_out :
+                    item.FinalOut !== undefined ? item.FinalOut :
+                    item.FINAL_OUT !== undefined ? item.FINAL_OUT :
+                    item.out !== undefined ? item.out :
+                    item.Out !== undefined ? item.Out :
+                    item.OUT !== undefined ? item.OUT :
+                    item.out_time || item.outTime || item.OutTime || item.OUT_TIME ||
+                    item.punch_out || item.punchOut || item.PunchOut || item.PUNCH_OUT ||
+                    item.check_out || item.checkOut || item.departure || '';
+
+    // Resolve break times
+    const out1 = item.out1 || item.out_1 || item.Out1 || item.break1_out || item.break_out_1 || item.lunch_out || '';
+    const in1 = item.in1 || item.in_1 || item.In1 || item.break1_in || item.break_in_1 || item.lunch_in || '';
+    const out2 = item.out2 || item.out_2 || item.Out2 || item.break2_out || item.break_out_2 || item.tea_out || '';
+    const in2 = item.in2 || item.in_2 || item.In2 || item.break2_in || item.break_in_2 || item.tea_in || '';
+    const out3 = item.out3 || item.out_3 || item.Out3 || item.break3_out || item.break_out_3 || '';
+    const in3 = item.in3 || item.in_3 || item.In3 || item.break3_in || item.break_in_3 || '';
+
+    const slNo = parseInt(item.slNo || item.sl_no || item.SlNo || item.SL_NO || item.id || item.s_no || (idx + 1), 10) || (idx + 1);
+
+    normalized.push({
+      slNo,
+      name: cleanName,
+      in: String(inTime).trim(),
+      out1: String(out1).trim(),
+      in1: String(in1).trim(),
+      out2: String(out2).trim(),
+      in2: String(in2).trim(),
+      out3: String(out3).trim(),
+      in3: String(in3).trim(),
+      finalOut: String(outTime).trim(),
+      remarks: item.remarks || item.Remarks || item.reason || ''
+    });
+  });
+
+  return { records: normalized, reportDate: String(reportDate).trim() };
+}
+
 /**
  * Direct Client-Side Gemini Vision Scan (Works Standalone in Mobile Browser without any PC Server!)
  */
 export async function directGeminiVisionScan(base64Image) {
-  const apiKey = getGeminiApiKey();
+  let apiKey = getGeminiApiKey();
   if (!apiKey) {
     throw new Error("Gemini API Key is required to scan your handwritten documents. Please click the 'AI Key' button at the top to enter your free key from https://aistudio.google.com/app/apikey");
   }
 
+  apiKey = apiKey.trim().replace(/^["']|["']$/g, '');
   const cleanBase64 = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
   
   const prompt = `You are an expert OCR vision AI specializing in reading and transcribing handwritten daily staff attendance register tables.
@@ -210,7 +350,11 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
         { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } }
       ]
     }],
-    generationConfig: { temperature: 0.1, maxOutputTokens: 8192 }
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 8192,
+      responseMimeType: "application/json"
+    }
   };
 
   // Try gemini-2.0-flash first, fallback to gemini-1.5-flash
@@ -240,16 +384,11 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
       const data = await resp.json();
       const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
       
-      let cleanText = rawText.trim();
-      if (cleanText.startsWith('```')) {
-        cleanText = cleanText.replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```$/, '').trim();
-      }
-
-      const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (Array.isArray(parsed.records) && parsed.records.length > 0) {
-          return { records: parsed.records, reportDate: parsed.reportDate || '' };
+      const parsed = parseJsonResponse(rawText);
+      if (parsed) {
+        const normalized = normalizeExtractedRecords(parsed);
+        if (normalized.records.length > 0) {
+          return normalized;
         }
       }
     } catch (err) {

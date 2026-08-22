@@ -797,6 +797,7 @@ async function handleMultipleFilesSelected(files) {
   ocrStatus.style.display = 'block';
   let accumulatedRecords = [];
   let detectedDate = '';
+  let lastBatchError = null;
 
   for (let idx = 0; idx < files.length; idx++) {
     const file = files[idx];
@@ -842,6 +843,7 @@ async function handleMultipleFilesSelected(files) {
       }
     } catch (err) {
       console.error(`Error scanning batch file ${file.name}:`, err);
+      lastBatchError = err;
     }
   }
 
@@ -861,9 +863,13 @@ async function handleMultipleFilesSelected(files) {
 
     renderApp();
     saveRosterToCache();
-    showToast(`Scanned ${files.length} pages! Formatted ${staffRecords.length} unique staff members.`, "success");
+    showToast(`Scanned ${files.length} page(s)! Formatted ${staffRecords.length} unique staff members.`, "success");
   } else {
-    showToast("No staff records could be extracted from selected files.", "info");
+    if (lastBatchError) {
+      showToast(`Scan Error: ${lastBatchError.message}`, "info");
+    } else {
+      showToast("No staff records could be extracted from selected files. Ensure images are clear and upright.", "info");
+    }
   }
 }
 

@@ -157,7 +157,8 @@ Return raw JSON only, no backticks, no markdown.
         ],
         "generationConfig": {
             "temperature": 0.1,
-            "maxOutputTokens": 8192
+            "maxOutputTokens": 8192,
+            "responseMimeType": "application/json"
         }
     }
 
@@ -183,28 +184,54 @@ Return raw JSON only, no backticks, no markdown.
                 text = re.sub(r'^```[a-zA-Z]*\n?', '', text)
                 text = re.sub(r'\n?```$', '', text).strip()
 
-            json_match = re.search(r'\{[\s\S]*\}', text)
-            if json_match:
-                parsed = json.loads(json_match.group(0))
-                records = parsed.get('records', [])
-                report_date = parsed.get('reportDate', '')
+            parsed = None
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                json_match = re.search(r'\{[\s\S]*\}', text)
+                if json_match:
+                    try:
+                        parsed = json.loads(json_match.group(0))
+                    except Exception:
+                        pass
 
-                cleaned = []
-                for r in records:
-                    if isinstance(r, dict) and 'name' in r:
-                        cleaned.append({
-                            'slNo': r.get('slNo', len(cleaned) + 1),
-                            'name': str(r.get('name', '')).strip().upper(),
-                            'in': str(r.get('in', '')).strip(),
-                            'out1': str(r.get('out1', '')).strip(),
-                            'in1': str(r.get('in1', '')).strip(),
-                            'out2': str(r.get('out2', '')).strip(),
-                            'in2': str(r.get('in2', '')).strip(),
-                            'out3': str(r.get('out3', '')).strip(),
-                            'in3': str(r.get('in3', '')).strip(),
-                            'finalOut': str(r.get('finalOut', '')).strip()
-                        })
-                return {'records': cleaned, 'reportDate': report_date}
+            if not parsed:
+                return {'records': [], 'reportDate': ''}
+
+            raw_records = []
+            report_date = ''
+            if isinstance(parsed, list):
+                raw_records = parsed
+            elif isinstance(parsed, dict):
+                report_date = parsed.get('reportDate') or parsed.get('report_date') or parsed.get('date') or ''
+                for k in ['records', 'staff', 'employees', 'attendance', 'data', 'rows', 'entries']:
+                    if isinstance(parsed.get(k), list):
+                        raw_records = parsed[k]
+                        break
+
+            cleaned = []
+            for idx, r in enumerate(raw_records):
+                if isinstance(r, dict):
+                    name = str(r.get('name') or r.get('Name') or r.get('staff_name') or r.get('employee_name') or '').strip().upper()
+                    name = re.sub(r'^[\d\s\.\-\(\)]+', '', name).strip()
+                    if len(name) < 2:
+                        continue
+                    in_time = str(r.get('in') if r.get('in') is not None else r.get('in_time') or r.get('punch_in') or '').strip()
+                    final_out = str(r.get('finalOut') if r.get('finalOut') is not None else r.get('out') or r.get('out_time') or r.get('punch_out') or '').strip()
+                    cleaned.append({
+                        'slNo': int(r.get('slNo') or r.get('sl_no') or (idx + 1)),
+                        'name': name,
+                        'in': in_time,
+                        'out1': str(r.get('out1') or r.get('out_1') or r.get('break1_out') or '').strip(),
+                        'in1': str(r.get('in1') or r.get('in_1') or r.get('break1_in') or '').strip(),
+                        'out2': str(r.get('out2') or r.get('out_2') or r.get('break2_out') or '').strip(),
+                        'in2': str(r.get('in2') or r.get('in_2') or r.get('break2_in') or '').strip(),
+                        'out3': str(r.get('out3') or r.get('out_3') or '').strip(),
+                        'in3': str(r.get('in3') or r.get('in_3') or '').strip(),
+                        'finalOut': final_out
+                    })
+
+            return {'records': cleaned, 'reportDate': report_date}
 
     except Exception as e:
         print(f"[Gemini Vision] Error: {e}")
