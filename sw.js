@@ -1,6 +1,6 @@
 // Service Worker for Staff Attendance Tracker PWA
 // Network-first strategy: always fetch fresh content when online, fall back to cache when offline
-const CACHE_VERSION = '1.1.8';
+const CACHE_VERSION = '1.1.9';
 const CACHE_NAME = `attendance-tracker-v${CACHE_VERSION}`;
 const ASSETS_TO_CACHE = [
   './',

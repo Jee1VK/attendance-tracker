@@ -104,11 +104,10 @@ def scan_with_gemini_vision(image_base64, mime_type='image/png'):
         return {'records': [], 'reportDate': ''}
 
     models = [
-        'gemini-3.6-flash',
+        'gemini-flash-lite-latest',
         'gemini-flash-latest',
-        'gemini-3.5-flash',
-        'gemini-2.5-flash-lite',
-        'gemini-3.7-flash'
+        'gemini-3.5-flash-lite',
+        'gemini-3.5-flash'
     ]
 
     prompt = """You are an expert OCR vision AI specializing in reading handwritten and printed daily staff attendance registers.
