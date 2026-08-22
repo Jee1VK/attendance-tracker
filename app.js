@@ -832,24 +832,26 @@ async function handleSingleFileSelected(file) {
 
 async function handleMultipleFilesSelected(files) {
   ocrStatus.style.display = 'block';
-  ocrMsg.textContent = `Preparing ${files.length} pages for fast parallel AI vision scanning...`;
+  ocrMsg.textContent = `Preparing ${files.length} pages for AI vision scanning...`;
   
   let accumulatedRecords = [];
   let detectedDate = '';
   let lastBatchError = null;
-  let completedCount = 0;
 
-  // Convert all files into processing promises in parallel
-  const tasks = files.map(async (file, idx) => {
+  for (let idx = 0; idx < files.length; idx++) {
+    const file = files[idx];
+    ocrMsg.textContent = `[Page ${idx + 1}/${files.length}] Scanning handwriting with Gemini AI Vision...`;
+
     try {
       if (file.name && file.name.toLowerCase().endsWith('.pdf')) {
         const arrayBuffer = await file.arrayBuffer();
         const scanRes = await processAllPdfPages(arrayBuffer, 0, (prog, msg) => {
           ocrMsg.textContent = `[Page ${idx + 1}/${files.length}] ${msg}`;
         });
-        completedCount++;
-        ocrMsg.textContent = `Scanned ${completedCount}/${files.length} pages in parallel...`;
-        return scanRes;
+        if (scanRes && Array.isArray(scanRes.records)) {
+          accumulatedRecords = accumulatedRecords.concat(scanRes.records);
+          if (scanRes.reportDate && !detectedDate) detectedDate = scanRes.reportDate;
+        }
       } else if (isImageFile(file)) {
         const cvs = await new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -872,30 +874,17 @@ async function handleMultipleFilesSelected(files) {
           const scanRes = await processCanvasOCR(cvs, (prog, msg) => {
             ocrMsg.textContent = `[Photo ${idx + 1}/${files.length}] ${msg}`;
           });
-          completedCount++;
-          ocrMsg.textContent = `Scanned ${completedCount}/${files.length} pages in parallel...`;
-          return scanRes;
+          if (scanRes && Array.isArray(scanRes.records)) {
+            accumulatedRecords = accumulatedRecords.concat(scanRes.records);
+            if (scanRes.reportDate && !detectedDate) detectedDate = scanRes.reportDate;
+          }
         }
       }
     } catch (err) {
       console.error(`Error scanning file ${file.name || 'Photo'}:`, err);
       lastBatchError = err;
-      return null;
     }
-    return null;
-  });
-
-  // Execute all page/photo scans simultaneously!
-  const results = await Promise.allSettled(tasks);
-
-  results.forEach(res => {
-    if (res.status === 'fulfilled' && res.value && Array.isArray(res.value.records)) {
-      accumulatedRecords = accumulatedRecords.concat(res.value.records);
-      if (res.value.reportDate && !detectedDate) {
-        detectedDate = res.value.reportDate;
-      }
-    }
-  });
+  }
 
   ocrStatus.style.display = 'none';
   if (fileInput) fileInput.value = '';
