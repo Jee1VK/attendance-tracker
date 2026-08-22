@@ -297,51 +297,20 @@ export function normalizeExtractedRecords(parsedData) {
 }
 
 /**
- * Direct Client-Side Gemini Vision Scan (Works Standalone in Mobile Browser without any PC Server!)
+ * Direct Client-Side Gemini Vision Scan — Speed-Optimized for Mobile!
  */
 export async function directGeminiVisionScan(base64Image) {
   let apiKey = getGeminiApiKey();
   if (!apiKey) {
-    throw new Error("Gemini API Key is required to scan your handwritten documents. Please click the 'AI Key' button at the top to enter your free key from https://aistudio.google.com/app/apikey");
+    throw new Error("Gemini API Key is required. Please click 'AI Key' at the top to enter your free key from https://aistudio.google.com/app/apikey");
   }
 
   apiKey = apiKey.trim().replace(/^["']|["']$/g, '');
   const cleanBase64 = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
   
-  const prompt = `You are an expert OCR vision AI specializing in reading and transcribing handwritten daily staff attendance register tables.
+  const prompt = `OCR this handwritten staff attendance register. For each row extract the real handwritten name (UPPERCASE), punch IN time, break times, and final OUT time. Use "AB" for absent, "NOTPUNCHED" if missing, "" if empty.
 
-CRITICAL INSTRUCTIONS:
-1. Scan the attendance register image row by row from top to bottom.
-2. Look at the "NAME" or "EMPLOYEE NAME" column (usually column 2).
-3. For every person / row:
-   - Carefully read and transcribe the EXACT REAL HANDWRITTEN NAME written in that row in UPPERCASE (e.g. "ANANDAMMA", "KUMAR", "RAMESH", "GEETHA", etc.).
-   - DO NOT output generic placeholders like "STAFF MEMBER" or "PERSON" - read the actual handwriting written in the image!
-   - Extract the Serial Number ("slNo").
-   - Extract Punch IN time ("in") - e.g. "10:01", "09:55", "10:44", "11:20", or "AB" if absent.
-   - Extract Break OUT/IN times ("out1", "in1", "out2", "in2", "out3", "in3") - e.g. "02:00:00 PM", "02:50:00 PM", or "" if empty.
-   - Extract Final Punch OUT time ("finalOut") - e.g. "07:30:00 PM", "09:30:00 PM", "NOTPUNCHED", or "AB".
-4. Extract the register header date into "reportDate" (e.g. "31/07/2026 FRIDAY" or whatever date is written at the top).
-
-OUTPUT FORMAT:
-Return ONLY a valid JSON object matching this schema:
-{
-  "reportDate": "31/07/2026 FRIDAY",
-  "records": [
-    {
-      "slNo": 1,
-      "name": "REAL_NAME_FROM_IMAGE",
-      "in": "10:01",
-      "out1": "02:00:00 PM",
-      "in1": "02:50:00 PM",
-      "out2": "",
-      "in2": "",
-      "out3": "",
-      "in3": "",
-      "finalOut": "07:30:00 PM"
-    }
-  ]
-}
-Return pure JSON only, without markdown code blocks, backticks, or any additional text.`;
+Return JSON: {"reportDate":"DD/MM/YYYY DAY","records":[{"slNo":1,"name":"NAME","in":"10:01","out1":"","in1":"","out2":"","in2":"","out3":"","in3":"","finalOut":"07:30:00 PM"}]}`;
 
   const payload = {
     contents: [{
@@ -357,33 +326,40 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
     }
   };
 
-  // Prioritize cached working model or fastest active models for instant response
-  const preferredModel = sessionStorage.getItem('gemini_working_model') || 'gemini-2.0-flash';
-  const initialModels = [
-    preferredModel,
+  // Use cached working model first, then only fast flash models (no slow thinking/pro models)
+  const preferredModel = sessionStorage.getItem('gemini_working_model');
+  const fastModels = [
     'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-2.5-flash',
-    'gemini-2.0-flash-exp',
-    'gemini-1.5-pro'
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash'
   ];
+  const modelList = preferredModel && !fastModels.includes(preferredModel)
+    ? [preferredModel, ...fastModels]
+    : [...fastModels];
 
-  let models = [...new Set(initialModels)];
   let lastError = null;
   const triedModels = new Set();
 
-  for (let i = 0; i < models.length; i++) {
-    const model = models[i];
+  for (let i = 0; i < modelList.length; i++) {
+    const model = modelList[i];
     if (triedModels.has(model)) continue;
     triedModels.add(model);
 
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      
+      // Abort if any single model takes longer than 15 seconds
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const t0 = performance.now();
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
 
       if (!resp.ok) {
         const errorData = await resp.json().catch(() => ({}));
@@ -394,73 +370,37 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
           throw new Error(`Invalid Gemini API Key: ${errMsg}. Please click 'AI Key' at the top to re-enter your key.`);
         }
 
-        // If Google suggests a newer model in the 404 error message (e.g. "use models/gemini-2.5-flash"), auto-add it to queue!
-        const suggestedModelMatch = errMsg.match(/models\/([a-zA-Z0-9\.\-_]+)/);
-        if (suggestedModelMatch && suggestedModelMatch[1] && !triedModels.has(suggestedModelMatch[1])) {
-          console.log(`Auto-discovered recommended Gemini model: ${suggestedModelMatch[1]}`);
-          models.push(suggestedModelMatch[1]);
+        // If Google suggests a model in the error, queue it next
+        const suggestedMatch = errMsg.match(/models\/([a-zA-Z0-9.\-_]+)/);
+        if (suggestedMatch && suggestedMatch[1] && !triedModels.has(suggestedMatch[1])) {
+          modelList.push(suggestedMatch[1]);
         }
 
-        throw new Error(`Gemini Vision API (${model}) error: ${errMsg}`);
+        throw new Error(`Gemini (${model}): ${errMsg}`);
       }
 
       const data = await resp.json();
+      const elapsed = Math.round(performance.now() - t0);
+      console.log(`✅ Gemini ${model} responded in ${elapsed}ms`);
+
       const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      
       const parsed = parseJsonResponse(rawText);
       if (parsed) {
         const normalized = normalizeExtractedRecords(parsed);
         if (normalized.records.length > 0) {
-          // Cache this working model for instant subsequent scans!
           sessionStorage.setItem('gemini_working_model', model);
           return normalized;
         }
       }
     } catch (err) {
-      // API key errors are fatal — don't try next model, it will also fail
       if (err.message && err.message.includes('API Key')) throw err;
-      lastError = err;
-      console.warn(`Vision model ${model} failed, trying next...`, err);
-    }
-  }
-
-  // If all hardcoded models returned 404, dynamically query /v1beta/models to find active models for this API key
-  try {
-    const listResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-    if (listResp.ok) {
-      const listData = await listResp.json();
-      const activeVisionModels = (listData.models || [])
-        .filter(m => (m.supportedGenerationMethods || []).includes('generateContent') && m.name && !triedModels.has(m.name.replace('models/', '')))
-        .map(m => m.name.replace('models/', ''));
-
-      for (const dynamicModel of activeVisionModels) {
-        try {
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${dynamicModel}:generateContent?key=${apiKey}`;
-          const resp = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-
-          if (resp.ok) {
-            const data = await resp.json();
-            const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            const parsed = parseJsonResponse(rawText);
-            if (parsed) {
-              const normalized = normalizeExtractedRecords(parsed);
-              if (normalized.records.length > 0) {
-                sessionStorage.setItem('gemini_working_model', dynamicModel);
-                return normalized;
-              }
-            }
-          }
-        } catch (e) {
-          console.warn(`Dynamic model ${dynamicModel} failed:`, e);
-        }
+      if (err.name === 'AbortError') {
+        console.warn(`⏱️ Model ${model} timed out after 15s, trying next...`);
+      } else {
+        console.warn(`Model ${model} failed:`, err.message);
       }
+      lastError = err;
     }
-  } catch (discoveryErr) {
-    console.warn("Dynamic model discovery failed:", discoveryErr);
   }
 
   if (lastError) throw lastError;
@@ -489,11 +429,15 @@ export async function processCanvasOCR(canvas, progressCallback) {
 
   if (!isStaticHost) {
     try {
+      const proxyCtrl = new AbortController();
+      const proxyTimeout = setTimeout(() => proxyCtrl.abort(), 3000);
       const response = await fetch('/api/scan-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: dataUrl, mimeType: 'image/jpeg' })
+        body: JSON.stringify({ image: dataUrl, mimeType: 'image/jpeg' }),
+        signal: proxyCtrl.signal
       });
+      clearTimeout(proxyTimeout);
 
       if (response.ok) {
         const res = await response.json();
@@ -574,11 +518,15 @@ export async function processAllPdfPages(pdfArrayBuffer, rotation, progressCallb
     let pageScanned = false;
 
     try {
+      const pdfProxyCtrl = new AbortController();
+      const pdfProxyTimeout = setTimeout(() => pdfProxyCtrl.abort(), 3000);
       const response = await fetch('/api/scan-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: dataUrl, mimeType: 'image/jpeg' })
+        body: JSON.stringify({ image: dataUrl, mimeType: 'image/jpeg' }),
+        signal: pdfProxyCtrl.signal
       });
+      clearTimeout(pdfProxyTimeout);
 
       if (response.ok) {
         const res = await response.json();
