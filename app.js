@@ -411,21 +411,42 @@ function setupEventListeners() {
     });
   }
 
-  // Gemini API Key Settings
+  // Gemini API Key Modal Settings
   const btnApiKey = document.getElementById('btn-api-key');
-  if (btnApiKey) {
+  const apiKeyModal = document.getElementById('api-key-modal');
+  const inputGeminiKey = document.getElementById('input-gemini-key');
+  const btnSaveKey = document.getElementById('btn-save-key');
+  const btnClearKey = document.getElementById('btn-clear-key');
+  const btnCloseKeyModal = document.getElementById('btn-close-key-modal');
+
+  if (btnApiKey && apiKeyModal) {
     btnApiKey.addEventListener('click', () => {
-      const currentKey = localStorage.getItem('gemini_api_key') || '';
-      const input = prompt("🔑 Free Gemini API Key Settings:\n\nLeave blank to reset, or enter your key below:\n(Get one free at https://aistudio.google.com/app/apikey)", currentKey);
-      if (input !== null) {
-        if (input.trim()) {
-          localStorage.setItem('gemini_api_key', input.trim());
-          showToast("Gemini API Key saved for standalone mobile scanning!", "success");
-        } else {
-          localStorage.removeItem('gemini_api_key');
-          showToast("Gemini API Key reset.", "info");
-        }
+      inputGeminiKey.value = localStorage.getItem('gemini_api_key') || '';
+      apiKeyModal.style.display = 'flex';
+      inputGeminiKey.focus();
+    });
+
+    btnCloseKeyModal?.addEventListener('click', () => {
+      apiKeyModal.style.display = 'none';
+    });
+
+    btnSaveKey?.addEventListener('click', () => {
+      const val = (inputGeminiKey.value || '').trim();
+      if (val) {
+        localStorage.setItem('gemini_api_key', val);
+        showToast("Gemini API Key saved for fast scanning!", "success");
+      } else {
+        localStorage.removeItem('gemini_api_key');
+        showToast("Gemini API Key cleared.", "info");
       }
+      apiKeyModal.style.display = 'none';
+    });
+
+    btnClearKey?.addEventListener('click', () => {
+      localStorage.removeItem('gemini_api_key');
+      inputGeminiKey.value = '';
+      showToast("Gemini API Key removed.", "info");
+      apiKeyModal.style.display = 'none';
     });
   }
 

@@ -6,13 +6,11 @@
 
 export function getGeminiApiKey() {
   let key = localStorage.getItem('gemini_api_key') || '';
-  if (!key) {
-    key = prompt("🔑 Enter your free Gemini API Key for direct client-side scanning:\n\n(Get one free at https://aistudio.google.com/app/apikey)") || '';
-    if (key) {
-      localStorage.setItem('gemini_api_key', key.trim());
-    }
+  if (!key && typeof document !== 'undefined') {
+    const modal = document.getElementById('api-key-modal');
+    if (modal) modal.style.display = 'flex';
   }
-  return key.trim();
+  return key.trim().replace(/^["']|["']$/g, '');
 }
 
 export function fuzzyMatchMasterName(rawName) {

@@ -92,7 +92,7 @@
         <div class="brand-title">
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <h1 style="margin: 0;">Staff Attendance Tracking App</h1>
-            <span class="header-version-tag" id="header-version-tag" title="Click to check for latest updates" style="cursor: pointer;"><i class="fa-solid fa-rotate" style="font-size: 0.65rem;"></i> v1.1.7</span>
+            <span class="header-version-tag" id="header-version-tag" title="Click to check for latest updates" style="cursor: pointer;"><i class="fa-solid fa-rotate" style="font-size: 0.65rem;"></i> v1.1.8</span>
           </div>
           <p>Instant AI Conversion • Direct Camera Capture • Excel & PDF Export • WhatsApp Share</p>
         </div>
@@ -379,7 +379,7 @@
         <span>Staff Attendance Tracking App</span>
       </div>
       <div class="footer-right">
-        <span class="app-version-badge" id="app-version-badge"><i class="fa-solid fa-code-branch"></i> v1.1.7</span>
+        <span class="app-version-badge" id="app-version-badge"><i class="fa-solid fa-code-branch"></i> v1.1.8</span>
       </div>
     </footer>
   </div>
@@ -543,6 +543,32 @@
   </div>
 
   <input type="file" id="backup-file-input" accept=".json" style="display: none;">
+
+  <!-- Gemini API Key Modal -->
+  <div id="api-key-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-key" style="color: #fbbf24;"></i> Gemini AI Key Settings</h2>
+        <button id="btn-close-key-modal" class="action-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="padding: 16px 0;">
+        <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 14px; line-height: 1.5;">
+          Enter your Google Gemini API Key below for instant AI document scanning on your phone.
+        </p>
+        <div class="form-group full-width">
+          <label for="input-gemini-key">API Key</label>
+          <input type="text" id="input-gemini-key" placeholder="AIzaSy... or AQ.Ab..." style="width: 100%; font-family: monospace; font-size: 0.875rem;">
+        </div>
+        <div style="margin-top: 10px; font-size: 0.8125rem; color: var(--text-muted);">
+          Don't have a key? <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: var(--accent-secondary); text-decoration: underline;">Get free API key from Google AI Studio</a>
+        </div>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px;">
+        <button id="btn-clear-key" class="btn btn-outline" style="color: #ef4444;"><i class="fa-solid fa-trash-can"></i> Remove Key</button>
+        <button id="btn-save-key" class="btn btn-success"><i class="fa-solid fa-check"></i> Save Key</button>
+      </div>
+    </div>
+  </div>
 
   <!-- WhatsApp Share Modal -->
   <div id="whatsapp-modal" class="modal-overlay" style="display: none;">
