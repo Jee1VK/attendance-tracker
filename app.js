@@ -695,16 +695,27 @@ function setupEventListeners() {
       }
 
       if (scanResult && scanResult.records && scanResult.records.length > 0) {
-        staffRecords = scanResult.records;
-
-        if (scanResult.reportDate) {
-          reportDate = scanResult.reportDate;
-          inputReportDate.value = reportDate;
+        if (staffRecords.length > 0) {
+          const merged = deduplicateAndMergeRecords(staffRecords.concat(scanResult.records));
+          const newStaffCount = merged.length - staffRecords.length;
+          staffRecords = merged;
+          if (scanResult.reportDate) {
+            reportDate = scanResult.reportDate;
+            inputReportDate.value = reportDate;
+          }
+          renderApp();
+          saveRosterToCache();
+          showToast(`Extracted ${scanResult.records.length} records! Added ${newStaffCount} new staff (Total: ${staffRecords.length})`, "success");
+        } else {
+          staffRecords = scanResult.records;
+          if (scanResult.reportDate) {
+            reportDate = scanResult.reportDate;
+            inputReportDate.value = reportDate;
+          }
+          renderApp();
+          saveRosterToCache();
+          showToast(`Gemini extracted ${scanResult.records.length} unique staff records! Date: ${scanResult.reportDate || 'Default'}`, "success");
         }
-
-        renderApp();
-        saveRosterToCache();
-        showToast(`Gemini extracted ${scanResult.records.length} unique staff records! Date: ${scanResult.reportDate || 'Default'}`, "success");
       } else {
         showToast("No records found. Try rotating the document.", "info");
       }
@@ -795,24 +806,24 @@ async function handleSingleFileSelected(file) {
 
 async function handleMultipleFilesSelected(files) {
   ocrStatus.style.display = 'block';
+  ocrMsg.textContent = `Preparing ${files.length} pages for fast parallel AI vision scanning...`;
+  
   let accumulatedRecords = [];
   let detectedDate = '';
   let lastBatchError = null;
+  let completedCount = 0;
 
-  for (let idx = 0; idx < files.length; idx++) {
-    const file = files[idx];
-    ocrMsg.textContent = `Batch scanning file ${idx + 1} of ${files.length}: ${file.name || 'Photo Page'}...`;
-
+  // Convert all files into processing promises in parallel
+  const tasks = files.map(async (file, idx) => {
     try {
       if (file.name && file.name.toLowerCase().endsWith('.pdf')) {
         const arrayBuffer = await file.arrayBuffer();
         const scanRes = await processAllPdfPages(arrayBuffer, 0, (prog, msg) => {
-          ocrMsg.textContent = `[${idx + 1}/${files.length}] ${msg}`;
+          ocrMsg.textContent = `[Page ${idx + 1}/${files.length}] ${msg}`;
         });
-        if (scanRes && scanRes.records) {
-          accumulatedRecords = accumulatedRecords.concat(scanRes.records);
-          if (scanRes.reportDate && !detectedDate) detectedDate = scanRes.reportDate;
-        }
+        completedCount++;
+        ocrMsg.textContent = `Scanned ${completedCount}/${files.length} pages in parallel...`;
+        return scanRes;
       } else if (isImageFile(file)) {
         const cvs = await new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -824,37 +835,61 @@ async function handleMultipleFilesSelected(files) {
               c.getContext('2d').drawImage(img, 0, 0);
               resolve(c);
             };
-            img.onerror = () => reject(new Error("Image load failed"));
+            img.onerror = () => reject(new Error(`Failed to load image ${file.name}`));
             img.src = evt.target.result;
           };
-          reader.onerror = () => reject(new Error("File read failed"));
+          reader.onerror = () => reject(new Error(`Failed to read file ${file.name}`));
           reader.readAsDataURL(file);
-        }).catch(() => null);
+        });
 
         if (cvs) {
           const scanRes = await processCanvasOCR(cvs, (prog, msg) => {
-            ocrMsg.textContent = `[${idx + 1}/${files.length}] ${msg}`;
+            ocrMsg.textContent = `[Photo ${idx + 1}/${files.length}] ${msg}`;
           });
-          if (scanRes && scanRes.records) {
-            accumulatedRecords = accumulatedRecords.concat(scanRes.records);
-            if (scanRes.reportDate && !detectedDate) detectedDate = scanRes.reportDate;
-          }
+          completedCount++;
+          ocrMsg.textContent = `Scanned ${completedCount}/${files.length} pages in parallel...`;
+          return scanRes;
         }
       }
     } catch (err) {
-      console.error(`Error scanning batch file ${file.name}:`, err);
+      console.error(`Error scanning file ${file.name || 'Photo'}:`, err);
       lastBatchError = err;
+      return null;
     }
-  }
+    return null;
+  });
+
+  // Execute all page/photo scans simultaneously!
+  const results = await Promise.allSettled(tasks);
+
+  results.forEach(res => {
+    if (res.status === 'fulfilled' && res.value && Array.isArray(res.value.records)) {
+      accumulatedRecords = accumulatedRecords.concat(res.value.records);
+      if (res.value.reportDate && !detectedDate) {
+        detectedDate = res.value.reportDate;
+      }
+    }
+  });
 
   ocrStatus.style.display = 'none';
   if (fileInput) fileInput.value = '';
   if (cameraInput) cameraInput.value = '';
   if (cameraAppendInput) cameraAppendInput.value = '';
+  capturedPhotos = [];
 
   if (accumulatedRecords.length > 0) {
     const uniqueRecords = deduplicateAndMergeRecords(accumulatedRecords);
-    staffRecords = uniqueRecords;
+    
+    // If records were already in the table, merge them cleanly
+    if (staffRecords.length > 0) {
+      const merged = deduplicateAndMergeRecords(staffRecords.concat(uniqueRecords));
+      const newCount = merged.length - staffRecords.length;
+      staffRecords = merged;
+      showToast(`Scanned ${files.length} page(s)! Added ${newCount} new staff members (Total: ${staffRecords.length})`, "success");
+    } else {
+      staffRecords = uniqueRecords;
+      showToast(`Scanned ${files.length} page(s)! Formatted ${staffRecords.length} unique staff members.`, "success");
+    }
 
     if (detectedDate) {
       reportDate = detectedDate;
@@ -863,7 +898,6 @@ async function handleMultipleFilesSelected(files) {
 
     renderApp();
     saveRosterToCache();
-    showToast(`Scanned ${files.length} page(s)! Formatted ${staffRecords.length} unique staff members.`, "success");
   } else {
     if (lastBatchError) {
       showToast(`Scan Error: ${lastBatchError.message}`, "info");

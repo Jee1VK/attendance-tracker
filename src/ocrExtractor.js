@@ -357,16 +357,18 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
     }
   };
 
-  // Comprehensive future-proof model fallback list
+  // Prioritize cached working model or fastest active models for instant response
+  const preferredModel = sessionStorage.getItem('gemini_working_model') || 'gemini-2.0-flash';
   const initialModels = [
-    'gemini-2.5-flash',
+    preferredModel,
     'gemini-2.0-flash',
-    'gemini-2.0-flash-exp',
     'gemini-1.5-flash',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash-exp',
     'gemini-1.5-pro'
   ];
 
-  let models = [...initialModels];
+  let models = [...new Set(initialModels)];
   let lastError = null;
   const triedModels = new Set();
 
@@ -409,6 +411,8 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
       if (parsed) {
         const normalized = normalizeExtractedRecords(parsed);
         if (normalized.records.length > 0) {
+          // Cache this working model for instant subsequent scans!
+          sessionStorage.setItem('gemini_working_model', model);
           return normalized;
         }
       }
@@ -445,6 +449,7 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
             if (parsed) {
               const normalized = normalizeExtractedRecords(parsed);
               if (normalized.records.length > 0) {
+                sessionStorage.setItem('gemini_working_model', dynamicModel);
                 return normalized;
               }
             }
@@ -475,24 +480,32 @@ export async function processCanvasOCR(canvas, progressCallback) {
 
   let scanError = null;
 
-  // 1. Try backend proxy server first (if running with local Python server)
-  try {
-    const response = await fetch('/api/scan-document', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: dataUrl, mimeType: 'image/jpeg' })
-    });
+  // 1. Only try backend proxy server if running on localhost with Python server (skip on GitHub Pages static hosting!)
+  const isStaticHost = typeof window !== 'undefined' && (
+    window.location.hostname.endsWith('github.io') ||
+    window.location.protocol === 'file:' ||
+    (!window.location.port && window.location.hostname !== 'localhost')
+  );
 
-    if (response.ok) {
-      const res = await response.json();
-      if (res.success && res.records && res.records.length > 0) {
-        progressCallback && progressCallback(100, `Gemini extracted ${res.records.length} staff records!`);
-        const uniqueRecords = deduplicateAndMergeRecords(res.records);
-        return { records: uniqueRecords, reportDate: res.reportDate || '' };
+  if (!isStaticHost) {
+    try {
+      const response = await fetch('/api/scan-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: dataUrl, mimeType: 'image/jpeg' })
+      });
+
+      if (response.ok) {
+        const res = await response.json();
+        if (res.success && res.records && res.records.length > 0) {
+          progressCallback && progressCallback(100, `Gemini extracted ${res.records.length} staff records!`);
+          const uniqueRecords = deduplicateAndMergeRecords(res.records);
+          return { records: uniqueRecords, reportDate: res.reportDate || '' };
+        }
       }
+    } catch (err) {
+      console.warn("Backend server unreached, using direct client-side Gemini Vision...", err);
     }
-  } catch (err) {
-    console.warn("Backend server unreached, using direct client-side Gemini Vision...", err);
   }
 
   // 2. Direct Client-Side Gemini Vision Scan (Works on phone without PC!)
