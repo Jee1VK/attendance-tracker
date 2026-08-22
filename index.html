@@ -29,7 +29,10 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').then((reg) => {
+        navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((reg) => {
+          // Force check for updates immediately
+          reg.update().catch(() => {});
+          
           reg.onupdatefound = () => {
             const installing = reg.installing;
             if (installing) {
@@ -41,6 +44,24 @@
             }
           };
         }).catch(err => console.log('SW reg error:', err));
+      });
+
+      // Reload when new SW activates and claims clients
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!refreshing) {
+          refreshing = true;
+          window.location.reload();
+        }
+      });
+
+      // Auto check for updates whenever the user switches back to the app
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          navigator.serviceWorker.getRegistration().then(reg => {
+            if (reg) reg.update().catch(() => {});
+          });
+        }
       });
     }
   </script>
@@ -71,7 +92,7 @@
         <div class="brand-title">
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <h1 style="margin: 0;">Staff Attendance Tracking App</h1>
-            <span class="header-version-tag">v1.1.3</span>
+            <span class="header-version-tag" id="header-version-tag" title="Click to check for latest updates" style="cursor: pointer;"><i class="fa-solid fa-rotate" style="font-size: 0.65rem;"></i> v1.1.3</span>
           </div>
           <p>Instant AI Conversion • Direct Camera Capture • Excel & PDF Export • WhatsApp Share</p>
         </div>

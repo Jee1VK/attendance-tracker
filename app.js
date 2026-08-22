@@ -474,6 +474,32 @@ function setupEventListeners() {
     });
   }
 
+  // Force Update / Cache Purge on tapping Version Tag
+  const headerVersionTag = document.getElementById('header-version-tag');
+  if (headerVersionTag) {
+    headerVersionTag.addEventListener('click', async () => {
+      showToast("Checking for updates and clearing cached files...", "info");
+      try {
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        }
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const reg of regs) {
+            await reg.unregister();
+          }
+        }
+        sessionStorage.clear();
+        setTimeout(() => {
+          window.location.reload(true);
+        }, 500);
+      } catch (err) {
+        window.location.reload(true);
+      }
+    });
+  }
+
   if (btnInstallApp) {
     btnInstallApp.addEventListener('click', async () => {
       if (deferredPrompt) {
