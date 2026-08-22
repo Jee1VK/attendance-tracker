@@ -104,43 +104,47 @@ def scan_with_gemini_vision(image_base64, mime_type='image/png'):
         return {'records': [], 'reportDate': ''}
 
     models = [
-        'gemini-2.5-flash',
-        'gemini-2.0-flash',
-        'gemini-2.0-flash-exp',
-        'gemini-1.5-flash',
-        'gemini-1.5-pro'
+        'gemini-3.6-flash',
+        'gemini-flash-latest',
+        'gemini-3.5-flash',
+        'gemini-2.5-flash-lite',
+        'gemini-3.7-flash'
     ]
 
-    prompt = """You are an expert OCR vision AI specializing in reading and transcribing handwritten daily staff attendance register tables.
+    prompt = """You are an expert OCR vision AI specializing in reading handwritten and printed daily staff attendance registers.
 
 CRITICAL INSTRUCTIONS:
-1. Scan the attendance register image row by row from top to bottom.
-2. Look at the "NAME" or "EMPLOYEE NAME" column (usually column 2).
-3. For every person / row:
-   - Carefully read and transcribe the EXACT REAL HANDWRITTEN NAME written in that row in UPPERCASE (e.g. "ANANDAMMA", "KUMAR", "RAMESH", "GEETHA", etc.).
-   - DO NOT output generic placeholders like "STAFF MEMBER" or "PERSON" - read the actual handwriting written in the image!
-   - Extract the Serial Number ("slNo").
-   - Extract Punch IN time ("in") - e.g. "10:01", "09:55", "10:44", "11:20", or "AB" if absent.
-   - Extract Break OUT/IN times ("out1", "in1", "out2", "in2", "out3", "in3") - e.g. "02:00:00 PM", "02:50:00 PM", or "" if empty.
-   - Extract Final Punch OUT time ("finalOut") - e.g. "07:30:00 PM", "09:30:00 PM", "NOTPUNCHED", or "AB".
-4. Extract the register header date into "reportDate" (e.g. "31/07/2026 FRIDAY" or whatever date is written at the top).
+1. The image may be rotated 90°, 180°, or 270° (e.g. taken vertically by mobile phone). Read the table following the printed rows and columns regardless of image rotation.
+2. Read all rows from top to bottom (Sl No 1 onwards).
+3. For each row:
+   - "slNo": Serial number integer (e.g. 1, 2, 3...).
+   - "name": Exact printed or written staff name in UPPERCASE (e.g. "ANANDAMMA", "ARUNKUMAR J", "B M SUHAS", "BABY G", "BALAJI H", etc.).
+   - "in": Punch IN time (e.g. "11:28", "10:35", "11:00", "09:50", "10:39", "11:50", "12:10") or "AB" if marked Ab/Absent.
+   - "out1": 1st Out break time (e.g. "01:50 PM", "01:25 PM", "03:37 PM", "03:20 PM", "12:13 PM") or "" if blank. Convert notations like "1-50", "1.50", "1=50" to "01:50 PM".
+   - "in1": 1st In break time (e.g. "02:34 PM", "02:14 PM", "04:12 PM", "04:00 PM", "12:26 PM") or "" if blank. Convert notations like "2-34", "2.34", "2=34" to "02:34 PM".
+   - "out2": 2nd Out break time (e.g. "03:10 PM", "05:12 PM", "02:25 PM") or "" if blank.
+   - "in2": 2nd In break time (e.g. "03:55 PM", "05:31 PM", "02:45 PM") or "" if blank.
+   - "out3": 3rd Out break time or "" if blank.
+   - "in3": 3rd In break time or "" if blank.
+   - "finalOut": Final Out punch time (e.g. "09:10 PM", "06:15 PM", "09:00 PM", "08:30 PM", "06:06 PM", "07:30 PM") or "NOTPUNCHED" if blank/not punched or "AB" if absent.
+4. Extract the date at the top right of the register into "reportDate" (e.g. "21/08/2026 FRIDAY").
 
 OUTPUT FORMAT:
-Return ONLY a valid JSON object matching this schema:
+Return pure JSON only matching this schema:
 {
-  "reportDate": "31/07/2026 FRIDAY",
+  "reportDate": "21/08/2026 FRIDAY",
   "records": [
     {
       "slNo": 1,
-      "name": "REAL_NAME_FROM_IMAGE",
-      "in": "10:01",
-      "out1": "02:00:00 PM",
-      "in1": "02:50:00 PM",
+      "name": "ANANDAMMA",
+      "in": "AB",
+      "out1": "",
+      "in1": "",
       "out2": "",
       "in2": "",
       "out3": "",
       "in3": "",
-      "finalOut": "07:30:00 PM"
+      "finalOut": "AB"
     }
   ]
 }
