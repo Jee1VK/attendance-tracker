@@ -320,22 +320,24 @@ Return JSON: {"reportDate":"DD/MM/YYYY DAY","records":[{"slNo":1,"name":"NAME","
       ]
     }],
     generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 4096,
+      temperature: 0.0,
+      maxOutputTokens: 2048,
       responseMimeType: "application/json"
     }
   };
 
-  // Use cached working model first, then only fast flash models (no slow thinking/pro models)
-  const preferredModel = sessionStorage.getItem('gemini_working_model');
-  const fastModels = [
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-flash'
-  ];
-  const modelList = preferredModel && !fastModels.includes(preferredModel)
-    ? [preferredModel, ...fastModels]
-    : [...fastModels];
+  // Strictly use the fastest production models: gemini-2.0-flash (sub-second) -> gemini-1.5-flash
+  // Purge any slow thinking models (like 2.5-flash) that may have been cached in browser session
+  let savedModel = sessionStorage.getItem('gemini_working_model');
+  if (savedModel && (savedModel.includes('2.5') || savedModel.includes('pro') || savedModel.includes('exp'))) {
+    sessionStorage.removeItem('gemini_working_model');
+    savedModel = null;
+  }
+
+  const modelList = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+  if (savedModel && !modelList.includes(savedModel)) {
+    modelList.unshift(savedModel);
+  }
 
   let lastError = null;
   const triedModels = new Set();
@@ -348,9 +350,8 @@ Return JSON: {"reportDate":"DD/MM/YYYY DAY","records":[{"slNo":1,"name":"NAME","
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
       
-      // Abort if any single model takes longer than 15 seconds
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
 
       const t0 = performance.now();
       const resp = await fetch(url, {
@@ -370,7 +371,6 @@ Return JSON: {"reportDate":"DD/MM/YYYY DAY","records":[{"slNo":1,"name":"NAME","
           throw new Error(`Invalid Gemini API Key: ${errMsg}. Please click 'AI Key' at the top to re-enter your key.`);
         }
 
-        // If Google suggests a model in the error, queue it next
         const suggestedMatch = errMsg.match(/models\/([a-zA-Z0-9.\-_]+)/);
         if (suggestedMatch && suggestedMatch[1] && !triedModels.has(suggestedMatch[1])) {
           modelList.push(suggestedMatch[1]);
@@ -381,7 +381,7 @@ Return JSON: {"reportDate":"DD/MM/YYYY DAY","records":[{"slNo":1,"name":"NAME","
 
       const data = await resp.json();
       const elapsed = Math.round(performance.now() - t0);
-      console.log(`✅ Gemini ${model} responded in ${elapsed}ms`);
+      console.log(`⚡ Gemini ${model} scanned in ${elapsed}ms`);
 
       const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
       const parsed = parseJsonResponse(rawText);
@@ -395,7 +395,7 @@ Return JSON: {"reportDate":"DD/MM/YYYY DAY","records":[{"slNo":1,"name":"NAME","
     } catch (err) {
       if (err.message && err.message.includes('API Key')) throw err;
       if (err.name === 'AbortError') {
-        console.warn(`⏱️ Model ${model} timed out after 15s, trying next...`);
+        console.warn(`⏱️ Model ${model} timed out after 12s, trying next...`);
       } else {
         console.warn(`Model ${model} failed:`, err.message);
       }
@@ -411,23 +411,22 @@ Return JSON: {"reportDate":"DD/MM/YYYY DAY","records":[{"slNo":1,"name":"NAME","
  * Sends canvas image to backend Gemini Vision API or direct client-side vision fallback.
  */
 export async function processCanvasOCR(canvas, progressCallback) {
-  progressCallback && progressCallback(10, "Optimizing handwritten image size...");
+  progressCallback && progressCallback(10, "Optimizing image...");
 
   const resized = resizeCanvasIfNeeded(canvas, 1200);
   const dataUrl = resized.toDataURL('image/jpeg', 0.75);
 
-  progressCallback && progressCallback(25, "Scanning handwritten names with Gemini AI Vision...");
+  progressCallback && progressCallback(25, "Scanning handwriting with Gemini 2.0 Flash...");
 
   let scanError = null;
 
-  // 1. Only try backend proxy server if running on localhost with Python server (skip on GitHub Pages static hosting!)
-  const isStaticHost = typeof window !== 'undefined' && (
-    window.location.hostname.endsWith('github.io') ||
-    window.location.protocol === 'file:' ||
-    (!window.location.port && window.location.hostname !== 'localhost')
+  // Only try backend proxy if explicitly running on localhost
+  const isLocalhost = typeof window !== 'undefined' && (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1'
   );
 
-  if (!isStaticHost) {
+  if (isLocalhost) {
     try {
       const proxyCtrl = new AbortController();
       const proxyTimeout = setTimeout(() => proxyCtrl.abort(), 3000);
