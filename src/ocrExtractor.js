@@ -352,7 +352,7 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
     }],
     generationConfig: {
       temperature: 0.1,
-      maxOutputTokens: 8192,
+      maxOutputTokens: 4096,
       responseMimeType: "application/json"
     }
   };
@@ -473,8 +473,8 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
 export async function processCanvasOCR(canvas, progressCallback) {
   progressCallback && progressCallback(10, "Optimizing handwritten image size...");
 
-  const resized = resizeCanvasIfNeeded(canvas, 1600);
-  const dataUrl = resized.toDataURL('image/jpeg', 0.85);
+  const resized = resizeCanvasIfNeeded(canvas, 1200);
+  const dataUrl = resized.toDataURL('image/jpeg', 0.75);
 
   progressCallback && progressCallback(25, "Scanning handwritten names with Gemini AI Vision...");
 
@@ -568,8 +568,8 @@ export async function processAllPdfPages(pdfArrayBuffer, rotation, progressCallb
     }).promise;
 
     const rotatedCvs = rotateCanvas(canvas, rotation);
-    const resizedCvs = resizeCanvasIfNeeded(rotatedCvs, 1600);
-    const dataUrl = resizedCvs.toDataURL('image/jpeg', 0.85);
+    const resizedCvs = resizeCanvasIfNeeded(rotatedCvs, 1200);
+    const dataUrl = resizedCvs.toDataURL('image/jpeg', 0.75);
 
     let pageScanned = false;
 

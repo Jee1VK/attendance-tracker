@@ -29,7 +29,18 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW reg error:', err));
+        navigator.serviceWorker.register('./sw.js').then((reg) => {
+          reg.onupdatefound = () => {
+            const installing = reg.installing;
+            if (installing) {
+              installing.onstatechange = () => {
+                if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                  window.location.reload();
+                }
+              };
+            }
+          };
+        }).catch(err => console.log('SW reg error:', err));
       });
     }
   </script>
@@ -58,7 +69,10 @@
           <i class="fa-solid fa-clipboard-user"></i>
         </div>
         <div class="brand-title">
-          <h1>Staff Attendance Tracking App</h1>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <h1 style="margin: 0;">Staff Attendance Tracking App</h1>
+            <span class="header-version-tag">v1.1.1</span>
+          </div>
           <p>Instant AI Conversion • Direct Camera Capture • Excel & PDF Export • WhatsApp Share</p>
         </div>
       </div>
@@ -565,6 +579,9 @@
   </div>
 
   <div class="toast-container" id="toast-container"></div>
+  <div class="floating-version-badge" id="floating-version-badge">
+    <i class="fa-solid fa-code-branch"></i> v1.1.1
+  </div>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
