@@ -16,7 +16,12 @@ export function getGeminiApiKey() {
 }
 
 export function fuzzyMatchMasterName(rawName) {
-  const masterDir = JSON.parse(localStorage.getItem('attendance_master_directory') || '[]');
+  let masterDir = [];
+  try {
+    masterDir = JSON.parse(localStorage.getItem('attendance_master_directory') || '[]');
+  } catch (e) {
+    masterDir = [];
+  }
   if (!Array.isArray(masterDir) || masterDir.length === 0) return rawName;
 
   const target = rawName.trim().toUpperCase();

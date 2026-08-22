@@ -40,9 +40,18 @@ export function formatMinutesToTime(minutes, includeSign = false) {
   const isNegative = minutes < 0;
   const absMinutes = Math.abs(minutes);
 
-  const h = Math.floor(absMinutes / 60);
-  const m = Math.floor(absMinutes % 60);
-  const s = Math.round((absMinutes % 1) * 60);
+  let h = Math.floor(absMinutes / 60);
+  let m = Math.floor(absMinutes % 60);
+  let s = Math.round((absMinutes % 1) * 60);
+
+  if (s === 60) {
+    s = 0;
+    m += 1;
+    if (m === 60) {
+      m = 0;
+      h += 1;
+    }
+  }
 
   const pad = (n) => String(n).padStart(2, '0');
   const formatted = `${h}:${pad(m)}:${pad(s)}`;
