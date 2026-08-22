@@ -87,12 +87,18 @@ function isImageFile(file) {
   return /\.(jpe?g|png|webp|bmp|gif|jfif|heic|tiff?)$/i.test(file.name || '');
 }
 
+// Safe JSON parser — prevents app crash if localStorage data is corrupted
+function safeJsonParse(raw, fallback = {}) {
+  try { return JSON.parse(raw) || fallback; }
+  catch (e) { console.warn('Corrupted localStorage data, resetting:', e); return fallback; }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   inputReportDate.value = reportDate;
   updateSavedReportsDropdown();
   
   // Load today's records from localStorage cache if present
-  const db = JSON.parse(localStorage.getItem('attendance_tracker_rosters') || '{}');
+  const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
   if (db[reportDate]) {
     staffRecords = db[reportDate];
   }
@@ -105,7 +111,7 @@ function saveRosterToCache() {
   const dateKey = (inputReportDate.value || reportDate).trim();
   if (!dateKey) return;
 
-  const db = JSON.parse(localStorage.getItem('attendance_tracker_rosters') || '{}');
+  const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
   db[dateKey] = staffRecords;
   localStorage.setItem('attendance_tracker_rosters', JSON.stringify(db));
 
@@ -113,7 +119,7 @@ function saveRosterToCache() {
 }
 
 function loadRosterFromCache(dateKey) {
-  const db = JSON.parse(localStorage.getItem('attendance_tracker_rosters') || '{}');
+  const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
   if (db[dateKey]) {
     staffRecords = db[dateKey];
     showToast(`Loaded records for ${dateKey}`, "success");
@@ -128,7 +134,7 @@ function updateSavedReportsDropdown() {
   const selectSavedReports = document.getElementById('select-saved-reports');
   if (!selectSavedReports) return;
 
-  const db = JSON.parse(localStorage.getItem('attendance_tracker_rosters') || '{}');
+  const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
   const savedDates = Object.keys(db).sort().reverse();
 
   selectSavedReports.innerHTML = '<option value="">-- Select Date --</option>';
@@ -471,10 +477,14 @@ function setupEventListeners() {
   if (btnInstallApp) {
     btnInstallApp.addEventListener('click', async () => {
       if (deferredPrompt) {
-        deferredPrompt.prompt();
-        const { outcome } = await deferredPrompt.userChoice;
-        if (outcome === 'accepted') {
-          showToast("App installed on your phone home screen!", "success");
+        try {
+          deferredPrompt.prompt();
+          const { outcome } = await deferredPrompt.userChoice;
+          if (outcome === 'accepted') {
+            showToast("App installed on your phone home screen!", "success");
+          }
+        } catch (err) {
+          console.warn('PWA install prompt error:', err);
         }
         deferredPrompt = null;
         btnInstallApp.style.display = 'none';
@@ -488,7 +498,7 @@ function setupEventListeners() {
     // Clear from localStorage for current date
     const dateKey = (inputReportDate.value || reportDate).trim();
     if (dateKey) {
-      const db = JSON.parse(localStorage.getItem('attendance_tracker_rosters') || '{}');
+      const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
       delete db[dateKey];
       localStorage.setItem('attendance_tracker_rosters', JSON.stringify(db));
     }
@@ -557,6 +567,7 @@ function setupEventListeners() {
             a.href = url;
             a.download = `Attendance_Report_${(inputReportDate.value || reportDate).replace(/[\/\\]/g, '-')}.png`;
             a.click();
+            URL.revokeObjectURL(url);
             showToast("Report image downloaded!", "success");
           }
         }
@@ -1050,7 +1061,12 @@ function openWhatsAppModal() {
 function showToast(message, type = 'info') {
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-  toast.innerHTML = `<i class="fa-solid ${type === 'success' ? 'fa-circle-check' : 'fa-circle-info'}"></i><span>${message}</span>`;
+  const icon = document.createElement('i');
+  icon.className = `fa-solid ${type === 'success' ? 'fa-circle-check' : 'fa-circle-info'}`;
+  const span = document.createElement('span');
+  span.textContent = message;
+  toast.appendChild(icon);
+  toast.appendChild(span);
   document.getElementById('toast-container').appendChild(toast);
   setTimeout(() => toast.remove(), 5000);
 }
@@ -1078,13 +1094,13 @@ function checkDiscrepancies(processedRecords) {
         category: 'Missing Check-Out',
         severity: 'warning',
         icon: 'fa-solid fa-clock-rotate-left',
-        message: `<b>${r.name}</b>: Check-out punch time is missing today (marked NOTPUNCHED).`
+        message: `${r.name}: Check-out punch time is missing today (marked NOTPUNCHED).`
       });
     }
   });
 
   // 2. Scan historical database in localStorage for repetitive negative patterns
-  const db = JSON.parse(localStorage.getItem('attendance_tracker_rosters') || '{}');
+  const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
   const savedDates = Object.keys(db);
   const totalSavedDays = savedDates.length;
 
@@ -1150,7 +1166,7 @@ function checkDiscrepancies(processedRecords) {
           category: 'Repetitive Lateness Pattern',
           severity: 'danger',
           icon: 'fa-solid fa-user-clock',
-          message: `<b>${r.name}</b>: Consistently Late — ${h.lateDays} out of ${h.presentDays} present days (${pct}% late rate).`
+          message: `${r.name}: Consistently Late — ${h.lateDays} out of ${h.presentDays} present days (${pct}% late rate).`
         });
       }
 
@@ -1162,7 +1178,7 @@ function checkDiscrepancies(processedRecords) {
           category: 'Repetitive Shortfall Hours Pattern',
           severity: 'danger',
           icon: 'fa-solid fa-hourglass-half',
-          message: `<b>${r.name}</b>: Frequent Shortfall — Fails to complete full shift target on ${h.shortfallDays} of ${h.presentDays} days (${pct}% shortfall rate).`
+          message: `${r.name}: Frequent Shortfall — Fails to complete full shift target on ${h.shortfallDays} of ${h.presentDays} days (${pct}% shortfall rate).`
         });
       }
 
@@ -1172,7 +1188,7 @@ function checkDiscrepancies(processedRecords) {
           category: 'Repetitive Unclosed Punches Pattern',
           severity: 'warning',
           icon: 'fa-solid fa-triangle-exclamation',
-          message: `<b>${r.name}</b>: Habitually forgets check-out punch — ${h.missingOutDays} unclosed registers recorded.`
+          message: `${r.name}: Habitually forgets check-out punch — ${h.missingOutDays} unclosed registers recorded.`
         });
       }
 
@@ -1184,7 +1200,7 @@ function checkDiscrepancies(processedRecords) {
           category: 'High Absence Pattern',
           severity: 'danger',
           icon: 'fa-solid fa-user-slash',
-          message: `<b>${r.name}</b>: Frequent Absences — Absent on ${h.absentDays} of ${h.totalDays} recorded dates (${pct}% absence rate).`
+          message: `${r.name}: Frequent Absences — Absent on ${h.absentDays} of ${h.totalDays} recorded dates (${pct}% absence rate).`
         });
       }
     });
@@ -1214,10 +1230,13 @@ function checkDiscrepancies(processedRecords) {
 
     const categoryTag = document.createElement('span');
     categoryTag.style.cssText = `font-size: 0.6875rem; font-weight: 700; background: ${badgeBg}; color: ${badgeColor}; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; white-space: nowrap;`;
-    categoryTag.innerHTML = `<i class="${item.icon}"></i> ${item.category}`;
+    const catIcon = document.createElement('i');
+    catIcon.className = item.icon;
+    categoryTag.appendChild(catIcon);
+    categoryTag.appendChild(document.createTextNode(' ' + item.category));
 
     const textSpan = document.createElement('span');
-    textSpan.innerHTML = item.message;
+    textSpan.textContent = item.message;
     textSpan.style.cssText = 'font-size: 0.8125rem; color: var(--text-main);';
 
     leftContainer.appendChild(categoryTag);
@@ -1252,7 +1271,7 @@ function renderMasterDirectory() {
   const container = document.getElementById('dir-staff-list');
   if (!container) return;
 
-  const masterDir = JSON.parse(localStorage.getItem('attendance_master_directory') || '[]');
+  const masterDir = safeJsonParse(localStorage.getItem('attendance_master_directory') || '[]', []);
   container.innerHTML = '';
 
   if (masterDir.length === 0) {
@@ -1289,7 +1308,7 @@ function addMasterStaffName() {
   const name = input.value.trim().toUpperCase();
   if (!name) return;
 
-  const masterDir = JSON.parse(localStorage.getItem('attendance_master_directory') || '[]');
+  const masterDir = safeJsonParse(localStorage.getItem('attendance_master_directory') || '[]', []);
   if (!masterDir.includes(name)) {
     masterDir.push(name);
     localStorage.setItem('attendance_master_directory', JSON.stringify(masterDir));
@@ -1308,7 +1327,7 @@ function renderMonthlyMatrix() {
   const tableBody = document.getElementById('matrix-table-body');
   if (!tableBody) return;
 
-  const db = JSON.parse(localStorage.getItem('attendance_tracker_rosters') || '{}');
+  const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
   const savedDates = Object.keys(db);
 
   if (savedDates.length === 0) {
@@ -1373,7 +1392,7 @@ function renderMonthlyMatrix() {
 }
 
 function exportMonthlyMatrixCSV() {
-  const db = JSON.parse(localStorage.getItem('attendance_tracker_rosters') || '{}');
+  const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
   const savedDates = Object.keys(db);
   if (savedDates.length === 0) {
     showToast("No saved rosters found to export!", "info");
@@ -1429,8 +1448,8 @@ function exportMonthlyMatrixCSV() {
    FEATURE 5: CLOUD & FILE BACKUP / RESTORE LOGIC
    ========================================================================== */
 function exportBackupJSON() {
-  const rosters = JSON.parse(localStorage.getItem('attendance_tracker_rosters') || '{}');
-  const masterDir = JSON.parse(localStorage.getItem('attendance_master_directory') || '[]');
+  const rosters = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
+  const masterDir = safeJsonParse(localStorage.getItem('attendance_master_directory') || '[]', []);
   const theme = localStorage.getItem('attendance_theme') || 'dark';
 
   const backupData = {

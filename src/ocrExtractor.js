@@ -2,7 +2,7 @@
  * Advanced Document & PDF OCR Extractor using Gemini Vision API
  * Dual-Mode Engine: Works with Backend Server OR Standalone Client-Side in Mobile Browser!
  */
-import { HANDWRITTEN_REGISTER_DATA } from './sampleData.js';
+
 
 export function getGeminiApiKey() {
   let key = localStorage.getItem('gemini_api_key') || '';
@@ -48,6 +48,7 @@ export function deduplicateAndMergeRecords(records) {
   const map = new Map();
 
   records.forEach(r => {
+    if (!r || typeof r !== 'object') return;
     let rawName = (r.name || '').trim().toUpperCase();
     if (!rawName || rawName.length < 2) return;
 
@@ -247,6 +248,8 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
         }
       }
     } catch (err) {
+      // API key errors are fatal — don't try next model, it will also fail
+      if (err.message && err.message.includes('API Key')) throw err;
       lastError = err;
       console.warn(`Vision model ${model} failed, trying next...`, err);
     }
@@ -384,6 +387,11 @@ export async function processAllPdfPages(pdfArrayBuffer, rotation, progressCallb
         console.error(`Page ${pageNum} direct scan error:`, e);
       }
     }
+
+    // Free canvas memory to prevent mobile memory spikes on large PDFs
+    canvas.width = 0; canvas.height = 0;
+    if (rotatedCvs !== canvas) { rotatedCvs.width = 0; rotatedCvs.height = 0; }
+    if (resizedCvs !== rotatedCvs) { resizedCvs.width = 0; resizedCvs.height = 0; }
   }
 
   if (rawRecords.length === 0) {

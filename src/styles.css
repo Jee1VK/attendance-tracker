@@ -665,6 +665,8 @@ body {
   min-width: 42px;
 }
 
+.attendance-table th:nth-child(1) { z-index: 12; }
+
 .attendance-table th:nth-child(2),
 .attendance-table td:nth-child(2) {
   position: sticky;
@@ -674,6 +676,8 @@ body {
   border-right: 1px solid var(--border-color);
   min-width: 130px;
 }
+
+.attendance-table th:nth-child(2) { z-index: 12; }
 
 .attendance-table tbody tr.row-shortfall td:nth-child(1),
 .attendance-table tbody tr.row-shortfall td:nth-child(2) {

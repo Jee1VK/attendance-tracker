@@ -25,7 +25,9 @@ export function parseTimeToMinutes(timeStr) {
   if (isPM && hours < 12) hours += 12;
   if (isAM && hours === 12) hours = 0;
   
-  if (!isAM && !isPM && hours >= 1 && hours <= 8 && parts[0] !== 10 && parts[0] !== 11 && parts[0] !== 12) {
+  // Only assume PM for ambiguous times 1:00-6:59 (break/out times are always afternoon)
+  // Hours 7-12 without AM/PM are kept as-is (could be morning punch-in at 7 or 8 AM)
+  if (!isAM && !isPM && hours >= 1 && hours <= 6) {
     hours += 12;
   }
 
