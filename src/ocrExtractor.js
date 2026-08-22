@@ -370,11 +370,17 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
   for (const model of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
+
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
 
       if (!resp.ok) {
         const errorData = await resp.json().catch(() => ({}));
@@ -399,7 +405,13 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
       }
     } catch (err) {
       if (err.message && err.message.includes('API Key')) throw err;
-      lastError = err;
+      if (err.name === 'AbortError') {
+        lastError = new Error("Request timed out. Please check your mobile internet connection.");
+      } else if (err.message && err.message.includes('Failed to fetch')) {
+        lastError = new Error("Network connection error (Failed to fetch). Please check your internet connection or verify your API key.");
+      } else {
+        lastError = err;
+      }
       console.warn(`Vision model ${model} failed, trying next...`, err);
     }
   }
@@ -412,12 +424,12 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
  * Sends canvas image to backend Gemini Vision API or direct client-side vision fallback.
  */
 export async function processCanvasOCR(canvas, progressCallback) {
-  progressCallback && progressCallback(10, "Optimizing image resolution...");
+  progressCallback && progressCallback(10, "Optimizing image for fast upload...");
 
-  const resized = resizeCanvasIfNeeded(canvas, 1600);
-  const dataUrl = resized.toDataURL('image/jpeg', 0.85);
+  const resized = resizeCanvasIfNeeded(canvas, 1200);
+  const dataUrl = resized.toDataURL('image/jpeg', 0.75);
 
-  progressCallback && progressCallback(25, "Scanning handwriting with Gemini AI Vision...");
+  progressCallback && progressCallback(25, "Scanning handwriting with Gemini AI Vision (5-7s)...");
 
   let scanError = null;
 
