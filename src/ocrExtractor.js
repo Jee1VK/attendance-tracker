@@ -357,11 +357,24 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
     }
   };
 
-  // Try gemini-2.0-flash first, fallback to gemini-1.5-flash
-  const models = ['gemini-2.0-flash', 'gemini-1.5-flash'];
-  let lastError = null;
+  // Comprehensive future-proof model fallback list
+  const initialModels = [
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-exp',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro'
+  ];
 
-  for (const model of models) {
+  let models = [...initialModels];
+  let lastError = null;
+  const triedModels = new Set();
+
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    if (triedModels.has(model)) continue;
+    triedModels.add(model);
+
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
       const resp = await fetch(url, {
@@ -378,6 +391,14 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
           localStorage.removeItem('gemini_api_key');
           throw new Error(`Invalid Gemini API Key: ${errMsg}. Please click 'AI Key' at the top to re-enter your key.`);
         }
+
+        // If Google suggests a newer model in the 404 error message (e.g. "use models/gemini-2.5-flash"), auto-add it to queue!
+        const suggestedModelMatch = errMsg.match(/models\/([a-zA-Z0-9\.\-_]+)/);
+        if (suggestedModelMatch && suggestedModelMatch[1] && !triedModels.has(suggestedModelMatch[1])) {
+          console.log(`Auto-discovered recommended Gemini model: ${suggestedModelMatch[1]}`);
+          models.push(suggestedModelMatch[1]);
+        }
+
         throw new Error(`Gemini Vision API (${model}) error: ${errMsg}`);
       }
 
@@ -397,6 +418,44 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
       lastError = err;
       console.warn(`Vision model ${model} failed, trying next...`, err);
     }
+  }
+
+  // If all hardcoded models returned 404, dynamically query /v1beta/models to find active models for this API key
+  try {
+    const listResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+    if (listResp.ok) {
+      const listData = await listResp.json();
+      const activeVisionModels = (listData.models || [])
+        .filter(m => (m.supportedGenerationMethods || []).includes('generateContent') && m.name && !triedModels.has(m.name.replace('models/', '')))
+        .map(m => m.name.replace('models/', ''));
+
+      for (const dynamicModel of activeVisionModels) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${dynamicModel}:generateContent?key=${apiKey}`;
+          const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          if (resp.ok) {
+            const data = await resp.json();
+            const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const parsed = parseJsonResponse(rawText);
+            if (parsed) {
+              const normalized = normalizeExtractedRecords(parsed);
+              if (normalized.records.length > 0) {
+                return normalized;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(`Dynamic model ${dynamicModel} failed:`, e);
+        }
+      }
+    }
+  } catch (discoveryErr) {
+    console.warn("Dynamic model discovery failed:", discoveryErr);
   }
 
   if (lastError) throw lastError;

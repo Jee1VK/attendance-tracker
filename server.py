@@ -103,7 +103,13 @@ def scan_with_gemini_vision(image_base64, mime_type='image/png'):
     if not GEMINI_API_KEY:
         return {'records': [], 'reportDate': ''}
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    models = [
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-exp',
+        'gemini-1.5-flash',
+        'gemini-1.5-pro'
+    ]
 
     prompt = """You are an expert OCR vision AI specializing in reading and transcribing handwritten daily staff attendance register tables.
 
@@ -162,23 +168,27 @@ Return raw JSON only, no backticks, no markdown.
         }
     }
 
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode('utf-8'),
-        headers={'Content-Type': 'application/json'}
-    )
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json'}
+        )
 
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            res_data = json.loads(resp.read().decode('utf-8'))
-            if 'candidates' not in res_data or len(res_data['candidates']) == 0:
-                return {'records': [], 'reportDate': ''}
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                res_data = json.loads(resp.read().decode('utf-8'))
+                if 'candidates' not in res_data or len(res_data['candidates']) == 0:
+                    continue
 
-            candidate = res_data['candidates'][0]
-            if 'content' not in candidate or 'parts' not in candidate['content']:
-                return {'records': [], 'reportDate': ''}
+                candidate = res_data['candidates'][0]
+                if 'content' not in candidate or 'parts' not in candidate['content']:
+                    continue
 
-            text = candidate['content']['parts'][0].get('text', '').strip()
+                text = candidate['content']['parts'][0].get('text', '').strip()
+                if not text:
+                    continue
 
             if text.startswith('```'):
                 text = re.sub(r'^```[a-zA-Z]*\n?', '', text)
