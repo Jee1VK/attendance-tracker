@@ -729,6 +729,45 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* App Footer & Version Badge */
+.app-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 24px;
+  padding: 14px 16px;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-header);
+}
+
+.app-version-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent-secondary);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-weight: 700;
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+}
+
+[data-theme="light"] .app-version-badge {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--accent-primary);
+  border-color: rgba(99, 102, 241, 0.25);
+}
+
+[data-theme="light"] .app-footer {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
 /* ==========================================================================
    MOBILE-FIRST UI/UX OPTIMIZATIONS (Smartphones & Tablets <= 768px)
    ========================================================================== */
@@ -985,6 +1024,21 @@ body {
     padding: 10px 14px;
     font-size: 0.8125rem;
     justify-content: center;
+  }
+
+  /* Mobile Footer */
+  .app-footer {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    margin-top: 18px;
+    font-size: 0.75rem;
+  }
+
+  .app-version-badge {
+    font-size: 0.7rem;
+    padding: 2px 8px;
   }
 }
 
