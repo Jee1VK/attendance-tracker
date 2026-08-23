@@ -310,10 +310,14 @@ export async function directGeminiVisionScan(base64Image) {
 
 CRITICAL INSTRUCTIONS:
 1. The image may be rotated 90°, 180°, or 270° (e.g. taken vertically by mobile phone). Read the table following the printed rows and columns regardless of image rotation.
-2. Read all rows from top to bottom (Sl No 1 onwards).
+2. Read ALL rows visible in this image from top to bottom. The image may contain:
+   - Page 1 (Sl No 1 to 20)
+   - Page 2 (Sl No 21 to 40)
+   - Page 3 (Sl No 41 to 60)
+   - Or any other continuous subset of rows. Extract EVERY single row visible in this sheet!
 3. For each row:
-   - "slNo": Serial number integer (e.g. 1, 2, 3...).
-   - "name": Exact printed or written staff name in UPPERCASE (e.g. "ANANDAMMA", "ARUNKUMAR J", "B M SUHAS", "BABY G", "BALAJI H", etc.).
+   - "slNo": Serial number integer as printed/written (e.g. 1..20, 21..40, 41..60).
+   - "name": Exact printed or written staff name in UPPERCASE (e.g. "ANANDAMMA", "ARUNKUMAR J", "B M SUHAS", "BABY G", "BALAJI H", "RAVI M", "RAVISH P M", "VENKATESH BABU", etc.).
    - "in": Punch IN time (e.g. "11:28", "10:35", "11:00", "09:50", "10:39", "11:50", "12:10") or "AB" if marked Ab/Absent.
    - "out1": 1st Out break time (e.g. "01:50 PM", "01:25 PM", "03:37 PM", "03:20 PM", "12:13 PM") or "" if blank. Convert notations like "1-50", "1.50", "1=50" to "01:50 PM".
    - "in1": 1st In break time (e.g. "02:34 PM", "02:14 PM", "04:12 PM", "04:00 PM", "12:26 PM") or "" if blank. Convert notations like "2-34", "2.34", "2=34" to "02:34 PM".
@@ -322,7 +326,7 @@ CRITICAL INSTRUCTIONS:
    - "out3": 3rd Out break time or "" if blank.
    - "in3": 3rd In break time or "" if blank.
    - "finalOut": Final Out punch time (e.g. "09:10 PM", "06:15 PM", "09:00 PM", "08:30 PM", "06:06 PM", "07:30 PM") or "NOTPUNCHED" if blank/not punched or "AB" if absent.
-4. Extract the date at the top right of the register into "reportDate" (e.g. "21/08/2026 FRIDAY").
+4. Extract the date at the top right of the register into "reportDate" (e.g. "21/08/2026 FRIDAY"). If not visible on this page, leave as empty string.
 
 OUTPUT FORMAT:
 Return pure JSON only in this format:
@@ -390,6 +394,13 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
           localStorage.removeItem('gemini_api_key');
           throw new Error(`Invalid Gemini API Key: ${errMsg}. Please click 'AI Key' at the top to re-enter your key.`);
         }
+
+        // Auto-pause for rate limits (429) or temporary server errors (500/503)
+        if (resp.status === 429 || resp.status >= 500) {
+          console.warn(`Model ${model} hit ${resp.status}, pausing 1.5s before fallback...`);
+          await new Promise(r => setTimeout(r, 1500));
+        }
+
         throw new Error(`Gemini Vision API (${model}) error: ${errMsg}`);
       }
 

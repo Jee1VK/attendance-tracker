@@ -857,53 +857,77 @@ async function handleMultipleFilesSelected(files) {
   
   let accumulatedRecords = [];
   let detectedDate = '';
-  let lastBatchError = null;
+  let successfulPages = 0;
+  let failedPages = [];
 
   for (let idx = 0; idx < files.length; idx++) {
     const file = files[idx];
-    ocrMsg.textContent = `[Page ${idx + 1}/${files.length}] Scanning handwriting with Gemini AI Vision...`;
+    const pageNumber = idx + 1;
 
-    try {
-      if (file.name && file.name.toLowerCase().endsWith('.pdf')) {
-        const arrayBuffer = await file.arrayBuffer();
-        const scanRes = await processAllPdfPages(arrayBuffer, 0, (prog, msg) => {
-          ocrMsg.textContent = `[Page ${idx + 1}/${files.length}] ${msg}`;
-        });
-        if (scanRes && Array.isArray(scanRes.records)) {
-          accumulatedRecords = accumulatedRecords.concat(scanRes.records);
-          if (scanRes.reportDate && !detectedDate) detectedDate = scanRes.reportDate;
-        }
-      } else if (isImageFile(file)) {
-        const cvs = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (evt) => {
-            const img = new Image();
-            img.onload = () => {
-              const c = document.createElement('canvas');
-              c.width = img.width; c.height = img.height;
-              c.getContext('2d').drawImage(img, 0, 0);
-              resolve(c);
-            };
-            img.onerror = () => reject(new Error(`Failed to load image ${file.name}`));
-            img.src = evt.target.result;
-          };
-          reader.onerror = () => reject(new Error(`Failed to read file ${file.name}`));
-          reader.readAsDataURL(file);
-        });
+    // Add safe pacing delay between consecutive requests to avoid burst rate limiting
+    if (idx > 0) {
+      ocrMsg.textContent = `[Page ${pageNumber}/${files.length}] Pacing request (1s)...`;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
 
-        if (cvs) {
-          const scanRes = await processCanvasOCR(cvs, (prog, msg) => {
-            ocrMsg.textContent = `[Photo ${idx + 1}/${files.length}] ${msg}`;
+    ocrMsg.textContent = `[Page ${pageNumber}/${files.length}] Scanning handwriting with Gemini AI Vision...`;
+
+    let pageExtracted = false;
+
+    for (let attempt = 1; attempt <= 2 && !pageExtracted; attempt++) {
+      try {
+        if (file.name && file.name.toLowerCase().endsWith('.pdf')) {
+          const arrayBuffer = await file.arrayBuffer();
+          const scanRes = await processAllPdfPages(arrayBuffer, 0, (prog, msg) => {
+            ocrMsg.textContent = `[Page ${pageNumber}/${files.length}] ${msg}`;
           });
-          if (scanRes && Array.isArray(scanRes.records)) {
+          if (scanRes && Array.isArray(scanRes.records) && scanRes.records.length > 0) {
             accumulatedRecords = accumulatedRecords.concat(scanRes.records);
             if (scanRes.reportDate && !detectedDate) detectedDate = scanRes.reportDate;
+            pageExtracted = true;
+            successfulPages++;
+          }
+        } else if (isImageFile(file)) {
+          const cvs = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+              const img = new Image();
+              img.onload = () => {
+                const c = document.createElement('canvas');
+                c.width = img.width; c.height = img.height;
+                c.getContext('2d').drawImage(img, 0, 0);
+                resolve(c);
+              };
+              img.onerror = () => reject(new Error(`Failed to load image ${file.name}`));
+              img.src = evt.target.result;
+            };
+            reader.onerror = () => reject(new Error(`Failed to read file ${file.name}`));
+            reader.readAsDataURL(file);
+          });
+
+          if (cvs) {
+            const scanRes = await processCanvasOCR(cvs, (prog, msg) => {
+              ocrMsg.textContent = `[Photo ${pageNumber}/${files.length}] ${msg}`;
+            });
+            if (scanRes && Array.isArray(scanRes.records) && scanRes.records.length > 0) {
+              accumulatedRecords = accumulatedRecords.concat(scanRes.records);
+              if (scanRes.reportDate && !detectedDate) detectedDate = scanRes.reportDate;
+              pageExtracted = true;
+              successfulPages++;
+            }
           }
         }
+      } catch (err) {
+        console.warn(`Attempt ${attempt} for Page ${pageNumber} failed:`, err);
+        if (attempt < 2) {
+          ocrMsg.textContent = `[Page ${pageNumber}/${files.length}] Retrying scan (1.5s)...`;
+          await new Promise(r => setTimeout(r, 1500));
+        }
       }
-    } catch (err) {
-      console.error(`Error scanning file ${file.name || 'Photo'}:`, err);
-      lastBatchError = err;
+    }
+
+    if (!pageExtracted) {
+      failedPages.push(pageNumber);
     }
   }
 
@@ -921,10 +945,18 @@ async function handleMultipleFilesSelected(files) {
       const merged = deduplicateAndMergeRecords(staffRecords.concat(uniqueRecords));
       const newCount = merged.length - staffRecords.length;
       staffRecords = merged;
-      showToast(`Scanned ${files.length} page(s)! Added ${newCount} new staff members (Total: ${staffRecords.length})`, "success");
+      if (failedPages.length > 0) {
+        showToast(`Scanned ${successfulPages}/${files.length} pages (Total: ${staffRecords.length} staff). Note: Page ${failedPages.join(', ')} failed — you can upload it to append!`, "warning");
+      } else {
+        showToast(`Scanned all ${files.length} pages! Added ${newCount} new staff members (Total: ${staffRecords.length})`, "success");
+      }
     } else {
       staffRecords = uniqueRecords;
-      showToast(`Scanned ${files.length} page(s)! Formatted ${staffRecords.length} unique staff members.`, "success");
+      if (failedPages.length > 0) {
+        showToast(`Scanned ${successfulPages}/${files.length} pages (Total: ${staffRecords.length} staff). Note: Page ${failedPages.join(', ')} failed — you can upload it to append!`, "warning");
+      } else {
+        showToast(`Scanned all ${files.length} pages! Formatted ${staffRecords.length} staff members.`, "success");
+      }
     }
 
     if (detectedDate) {
@@ -935,11 +967,7 @@ async function handleMultipleFilesSelected(files) {
     renderApp();
     saveRosterToCache();
   } else {
-    if (lastBatchError) {
-      showToast(`Scan Error: ${lastBatchError.message}`, "info");
-    } else {
-      showToast("No staff records could be extracted from selected files. Ensure images are clear and upright.", "info");
-    }
+    showToast("No staff records could be extracted from selected files. Ensure images are clear and upright.", "info");
   }
 }
 
