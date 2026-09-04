@@ -115,9 +115,15 @@ export function calculateAttendanceRecord(record, targetMinutes = DEFAULT_TARGET
     };
   }
 
-  // Handle overnight shifts across midnight
+  // Handle evening shift or overnight shift
   if (endMins < startMins) {
-    endMins += 24 * 60;
+    // If punch-out was recorded without AM/PM and falls before in-time (e.g. In 11:12, Out 7:30),
+    // check if converting to PM (+12h) resolves it to a normal evening departure.
+    if (endMins < 720 && (endMins + 12 * 60) >= startMins) {
+      endMins += 12 * 60;
+    } else {
+      endMins += 24 * 60; // True overnight shift across midnight
+    }
   }
 
   let totalBreakMinutes = 0;
@@ -128,11 +134,13 @@ export function calculateAttendanceRecord(record, targetMinutes = DEFAULT_TARGET
   ];
 
   breakPairs.forEach(pair => {
-    const oMins = parseTimeToMinutes(pair.out);
+    let oMins = parseTimeToMinutes(pair.out);
     let iMins = parseTimeToMinutes(pair.in);
     if (oMins !== null && iMins !== null) {
-      if (iMins < oMins) iMins += 24 * 60;
-      totalBreakMinutes += (iMins - oMins);
+      if (oMins < startMins && oMins < 720 && (oMins + 12 * 60) >= startMins) oMins += 12 * 60;
+      if (iMins < oMins && iMins < 720 && (iMins + 12 * 60) >= oMins) iMins += 12 * 60;
+      else if (iMins < oMins) iMins += 24 * 60;
+      totalBreakMinutes += Math.max(0, iMins - oMins);
     }
   });
 

@@ -742,27 +742,15 @@ function setupEventListeners() {
       }
 
       if (scanResult && scanResult.records && scanResult.records.length > 0) {
-        if (staffRecords.length > 0) {
-          const merged = deduplicateAndMergeRecords(staffRecords.concat(scanResult.records));
-          const newStaffCount = merged.length - staffRecords.length;
-          staffRecords = merged;
-          if (scanResult.reportDate) {
-            reportDate = scanResult.reportDate;
-            inputReportDate.value = reportDate;
-          }
-          renderApp();
-          saveRosterToCache();
-          showToast(`Extracted ${scanResult.records.length} records! Added ${newStaffCount} new staff (Total: ${staffRecords.length})`, "success");
-        } else {
-          staffRecords = scanResult.records;
-          if (scanResult.reportDate) {
-            reportDate = scanResult.reportDate;
-            inputReportDate.value = reportDate;
-          }
-          renderApp();
-          saveRosterToCache();
-          showToast(`Gemini extracted ${scanResult.records.length} unique staff records! Date: ${scanResult.reportDate || 'Default'}`, "success");
+        staffRecords = scanResult.records;
+        if (scanResult.reportDate) {
+          reportDate = scanResult.reportDate;
+          inputReportDate.value = reportDate;
         }
+        renderApp();
+        saveRosterToCache();
+        showToast(`Gemini extracted ${scanResult.records.length} unique staff records! Date: ${scanResult.reportDate || 'Default'}`, "success");
+      }
       } else {
         showToast("No records found. Try rotating the document.", "info");
       }
@@ -940,23 +928,12 @@ async function handleMultipleFilesSelected(files) {
   if (accumulatedRecords.length > 0) {
     const uniqueRecords = deduplicateAndMergeRecords(accumulatedRecords);
     
-    // If records were already in the table, merge them cleanly
-    if (staffRecords.length > 0) {
-      const merged = deduplicateAndMergeRecords(staffRecords.concat(uniqueRecords));
-      const newCount = merged.length - staffRecords.length;
-      staffRecords = merged;
-      if (failedPages.length > 0) {
-        showToast(`Scanned ${successfulPages}/${files.length} pages (Total: ${staffRecords.length} staff). Note: Page ${failedPages.join(', ')} failed — you can upload it to append!`, "warning");
-      } else {
-        showToast(`Scanned all ${files.length} pages! Added ${newCount} new staff members (Total: ${staffRecords.length})`, "success");
-      }
+    // In batch file upload, replace roster freshly with the document's records
+    staffRecords = uniqueRecords;
+    if (failedPages.length > 0) {
+      showToast(`Scanned ${successfulPages}/${files.length} pages (Total: ${staffRecords.length} staff). Note: Page ${failedPages.join(', ')} failed — you can upload it to append!`, "warning");
     } else {
-      staffRecords = uniqueRecords;
-      if (failedPages.length > 0) {
-        showToast(`Scanned ${successfulPages}/${files.length} pages (Total: ${staffRecords.length} staff). Note: Page ${failedPages.join(', ')} failed — you can upload it to append!`, "warning");
-      } else {
-        showToast(`Scanned all ${files.length} pages! Formatted ${staffRecords.length} staff members.`, "success");
-      }
+      showToast(`Scanned all ${files.length} pages! Formatted ${staffRecords.length} staff members.`, "success");
     }
 
     if (detectedDate) {

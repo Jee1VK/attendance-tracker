@@ -57,13 +57,19 @@ export function deduplicateAndMergeRecords(records) {
 
     rawName = fuzzyMatchMasterName(rawName);
 
-    if (!map.has(rawName)) {
-      map.set(rawName, { ...r, name: rawName });
+    // Normalize comparison key: strip all spaces, dots, dashes, and parens
+    // e.g. "DEVARAJ N T" and "DEVARAJ NT" both map to "DEVARAJNT"
+    const normalizedKey = rawName.replace(/[\s\.\-\_\(\)]/g, '');
+
+    if (!map.has(normalizedKey)) {
+      map.set(normalizedKey, { ...r, name: rawName });
     } else {
-      const existing = map.get(rawName);
-      map.set(rawName, {
-        slNo: existing.slNo,
-        name: rawName,
+      const existing = map.get(normalizedKey);
+      // Prefer cleaner / canonical name representation
+      const bestName = (existing.name && existing.name.includes(' ') && !rawName.includes(' ')) ? existing.name : rawName;
+      map.set(normalizedKey, {
+        slNo: existing.slNo || r.slNo,
+        name: bestName,
         in: (existing.in && existing.in !== 'AB' && existing.in !== '-') ? existing.in : r.in,
         out1: existing.out1 || r.out1,
         in1: existing.in1 || r.in1,
@@ -71,7 +77,8 @@ export function deduplicateAndMergeRecords(records) {
         in2: existing.in2 || r.in2,
         out3: existing.out3 || r.out3,
         in3: existing.in3 || r.in3,
-        finalOut: (existing.finalOut && existing.finalOut !== 'AB' && existing.finalOut !== 'NOTPUNCHED' && existing.finalOut !== '-') ? existing.finalOut : r.finalOut
+        finalOut: (existing.finalOut && existing.finalOut !== 'AB' && existing.finalOut !== 'NOTPUNCHED' && existing.finalOut !== '-') ? existing.finalOut : r.finalOut,
+        remarks: existing.remarks || r.remarks || ''
       });
     }
   });
@@ -308,42 +315,48 @@ export async function directGeminiVisionScan(base64Image) {
   
   const prompt = `You are an expert OCR vision AI specializing in reading handwritten and printed daily staff attendance registers.
 
-CRITICAL INSTRUCTIONS:
-1. The image may be rotated 90°, 180°, or 270° (e.g. taken vertically by mobile phone). Read the table following the printed rows and columns regardless of image rotation.
-2. Read ALL rows visible in this image from top to bottom. The image may contain:
-   - Page 1 (Sl No 1 to 20)
-   - Page 2 (Sl No 21 to 40)
-   - Page 3 (Sl No 41 to 60)
-   - Or any other continuous subset of rows. Extract EVERY single row visible in this sheet!
+CRITICAL RULES & ANTI-HALLUCINATION INSTRUCTIONS:
+1. Column 2 is labeled "NAME". Transcribe the staff name ONLY from Column 2.
+   - DO NOT read names from the "IN/SIGN" or "OUT SIGN" signature columns!
+   - NEVER hallucinate, guess, or invent staff names (e.g. do NOT invent CHANDRA, DEEPA, GIRISH, KAVYA, KUMAR, LAKSHMI, MOHAN, NAGARAJ, POOJA)! Only output names that are clearly written in Column 2.
+   - If a row has a serial number but no staff name is printed/written, SKIP that row completely!
+2. Multi-Page Support:
+   - This image is part of an attendance register. It may contain:
+     * Page 1 (Sl No 1 to 20)
+     * Page 2 (Sl No 21 to 40)
+     * Page 3 (Sl No 41 to 60)
+   - Extract every valid staff row visible on this page.
 3. For each row:
-   - "slNo": Serial number integer as printed/written (e.g. 1..20, 21..40, 41..60).
-   - "name": Exact printed or written staff name in UPPERCASE (e.g. "ANANDAMMA", "ARUNKUMAR J", "B M SUHAS", "BABY G", "BALAJI H", "RAVI M", "RAVISH P M", "VENKATESH BABU", etc.).
-   - "in": Punch IN time (e.g. "11:28", "10:35", "11:00", "09:50", "10:39", "11:50", "12:10") or "AB" if marked Ab/Absent.
-   - "out1": 1st Out break time (e.g. "01:50 PM", "01:25 PM", "03:37 PM", "03:20 PM", "12:13 PM") or "" if blank. Convert notations like "1-50", "1.50", "1=50" to "01:50 PM".
-   - "in1": 1st In break time (e.g. "02:34 PM", "02:14 PM", "04:12 PM", "04:00 PM", "12:26 PM") or "" if blank. Convert notations like "2-34", "2.34", "2=34" to "02:34 PM".
-   - "out2": 2nd Out break time (e.g. "03:10 PM", "05:12 PM", "02:25 PM") or "" if blank.
-   - "in2": 2nd In break time (e.g. "03:55 PM", "05:31 PM", "02:45 PM") or "" if blank.
-   - "out3": 3rd Out break time or "" if blank.
-   - "in3": 3rd In break time or "" if blank.
-   - "finalOut": Final Out punch time (e.g. "09:10 PM", "06:15 PM", "09:00 PM", "08:30 PM", "06:06 PM", "07:30 PM") or "NOTPUNCHED" if blank/not punched or "AB" if absent.
-4. Extract the date at the top right of the register into "reportDate" (e.g. "21/08/2026 FRIDAY"). If not visible on this page, leave as empty string.
+   - "slNo": The integer serial number printed on this sheet (e.g. 1..20, 21..40, 41..60).
+   - "name": Exact printed or written staff name in UPPERCASE from Column 2 (e.g. "ANANDAMMA", "ARUNKUMAR J", "B M SUHAS", "BABY G", "BALAJI H", "RAVI M", "RAVISH P M", "RAJESHWARI S", "SHOBHA", "SHRUTHI C", "SRIDHAR S", "SRIKANTA DATTA", "SRINIVAS D A", "SUSHMITHA", "SURESH C", "VEENA K S", "VARADHA RAJAN", "VENKATESH BABU", etc.).
+   - "in": Punch IN time (e.g. "10:45", "10:38", "11:12", "09:55", "11:24", "10:29", "12:30", "11:20") or "AB" if marked Ab/Absent.
+   - "out1": 1st Out break time. Convert notations like "2-05", "2.05", "2=05", "12-07" to afternoon format e.g. "02:05 PM", "12:07 PM", or "" if blank.
+   - "in1": 1st In break time. Convert notations like "2-50", "12-40" to "02:50 PM", "12:40 PM", or "" if blank.
+   - "out2": 2nd Out break time (e.g. "01:36 PM", "04:58 PM", "03:00 PM") or "" if blank.
+   - "in2": 2nd In break time (e.g. "02:07 PM", "05:07 PM", "03:34 PM") or "" if blank.
+   - "out3": 3rd Out break time (e.g. "04:58 PM", "05:43 PM") or "" if blank.
+   - "in3": 3rd In break time (e.g. "05:07 PM", "06:18 PM") or "" if blank.
+   - "finalOut": Final Out punch time. IMPORTANT: Evening punch out times MUST have "PM" attached (e.g. "7:30" -> "07:30 PM", "8:12" -> "08:12 PM", "8:31" -> "08:31 PM", "9:30" -> "09:30 PM", "8:28" -> "08:28 PM"). If absent, output "AB". If blank/left without punch, output "NOTPUNCHED".
+   - "remarks": If marked "Half day" or any special remark in handwriting, include it in "remarks" (e.g. "Half day").
+4. Extract the date at the top of the register into "reportDate" (e.g. "03/09/2026 THURSDAY").
 
 OUTPUT FORMAT:
 Return pure JSON only in this format:
 {
-  "reportDate": "21/08/2026 FRIDAY",
+  "reportDate": "03/09/2026 THURSDAY",
   "records": [
     {
       "slNo": 1,
       "name": "ANANDAMMA",
-      "in": "AB",
-      "out1": "",
-      "in1": "",
+      "in": "10:45",
+      "out1": "02:05 PM",
+      "in1": "02:50 PM",
       "out2": "",
       "in2": "",
       "out3": "",
       "in3": "",
-      "finalOut": "AB"
+      "finalOut": "07:30 PM",
+      "remarks": ""
     }
   ]
 }
