@@ -1,6 +1,7 @@
 import { calculateSummaryMetrics, parseTimeToMinutes, calculatePayroll, calculateAttendanceRecord } from './src/attendanceCalculator.js';
 import { generateAttendancePDF } from './src/pdfExporter.js';
 import { renderPdfToCanvas, rotateCanvas, processCanvasOCR, processAllPdfPages, deduplicateAndMergeRecords } from './src/ocrExtractor.js';
+import { HANDWRITTEN_REGISTER_DATA } from './src/sampleData.js';
 
 // Application State
 let staffRecords = [];
@@ -198,7 +199,11 @@ function renderTable(records) {
     const tr = document.createElement('tr');
     if (r.isShortfall && !r.isAbsent) tr.classList.add('row-shortfall');
 
-    const originalIndex = (r.slNo || 1) - 1;
+    // Find the true master index in staffRecords array
+    let realIndex = staffRecords.findIndex(item => item === r || (item.name && item.name === r.name));
+    if (realIndex === -1) {
+      realIndex = (r.slNo || 1) - 1;
+    }
     
     // Format custom individual shift target label if set
     const shiftLabel = r.targetMinutes !== undefined && r.targetMinutes !== targetMinutes
@@ -220,8 +225,8 @@ function renderTable(records) {
       <td class="${r.isShortfall && !r.isAbsent ? 'cell-shortfall' : ''}">${r.shortfall}</td>
       <td style="font-size: 0.75rem; color: var(--text-muted);">${esc(r.remarks || '-')}</td>
       <td>
-        <button class="action-btn edit-btn" data-id="${originalIndex}" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
-        <button class="action-btn delete delete-btn" data-id="${originalIndex}" title="Remove"><i class="fa-solid fa-trash-can"></i></button>
+        <button class="action-btn edit-btn" data-id="${realIndex}" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
+        <button class="action-btn delete delete-btn" data-id="${realIndex}" title="Remove"><i class="fa-solid fa-trash-can"></i></button>
       </td>`;
     tableBody.appendChild(tr);
   });
@@ -559,6 +564,18 @@ function setupEventListeners() {
     showToast("Session reset. Upload handwritten PDF(s) or photo(s)!", "info");
   });
 
+  const btnLoadDemo = document.getElementById('btn-load-demo');
+  if (btnLoadDemo) {
+    btnLoadDemo.addEventListener('click', () => {
+      staffRecords = JSON.parse(JSON.stringify(HANDWRITTEN_REGISTER_DATA));
+      reportDate = "03/09/2026 THURSDAY";
+      inputReportDate.value = reportDate;
+      renderApp();
+      saveRosterToCache();
+      showToast(`Loaded ${staffRecords.length} staff records from demo register!`, "success");
+    });
+  }
+
   document.getElementById('btn-add-staff').addEventListener('click', () => openAddModal());
 
   document.getElementById('btn-export-pdf').addEventListener('click', () => {
@@ -750,7 +767,6 @@ function setupEventListeners() {
         renderApp();
         saveRosterToCache();
         showToast(`Gemini extracted ${scanResult.records.length} unique staff records! Date: ${scanResult.reportDate || 'Default'}`, "success");
-      }
       } else {
         showToast("No records found. Try rotating the document.", "info");
       }

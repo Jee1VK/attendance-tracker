@@ -256,8 +256,8 @@ Return raw JSON only, no backticks, no markdown.
 
             return {'records': cleaned, 'reportDate': report_date}
 
-    except Exception as e:
-        print(f"[Gemini Vision] Error: {e}")
+        except Exception as e:
+            print(f"[Gemini Vision] Error with {model}: {e}")
 
     return {'records': [], 'reportDate': ''}
 
