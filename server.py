@@ -16,7 +16,15 @@ else:
     # Running as Python script
     DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+if not GEMINI_API_KEY:
+    key_file = os.path.join(DIRECTORY, "gemini_key.txt")
+    if os.path.exists(key_file):
+        try:
+            with open(key_file, "r", encoding="utf-8") as kf:
+                GEMINI_API_KEY = kf.read().strip()
+        except Exception:
+            pass
 
 class CustomHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -42,6 +50,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 data = json.loads(body.decode('utf-8'))
                 image_base64 = data.get('image', '')
                 mime_type = data.get('mimeType', 'image/png')
+                client_api_key = (data.get('apiKey') or '').strip()
 
                 if ',' in image_base64:
                     header_part = image_base64.split(',', 1)[0]
@@ -51,7 +60,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         mime_type = mime_match.group(1)
 
                 print(f"[Gemini Vision] Scanning handwritten document ({len(image_base64)//1024} KB)...")
-                scan_result = scan_with_gemini_vision(image_base64, mime_type)
+                scan_result = scan_with_gemini_vision(image_base64, mime_type, api_key=client_api_key)
 
                 records = scan_result.get('records', [])
                 report_date = scan_result.get('reportDate', '')
@@ -99,8 +108,9 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
 
-def scan_with_gemini_vision(image_base64, mime_type='image/png'):
-    if not GEMINI_API_KEY:
+def scan_with_gemini_vision(image_base64, mime_type='image/png', api_key=None):
+    active_key = (api_key or '').strip() or GEMINI_API_KEY
+    if not active_key:
         return {'records': [], 'reportDate': ''}
 
     models = [
@@ -182,7 +192,7 @@ Return raw JSON only, no backticks, no markdown.
     }
 
     for model in models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={active_key}"
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode('utf-8'),

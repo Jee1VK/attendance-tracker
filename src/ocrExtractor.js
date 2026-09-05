@@ -112,6 +112,43 @@ export function resizeCanvasIfNeeded(sourceCanvas, maxDimension = 1600) {
   return canvas;
 }
 
+export function loadImageFileToCanvas(file, maxDimension = 1600) {
+  return new Promise((resolve, reject) => {
+    if (!file) return reject(new Error("No file selected."));
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const cvs = document.createElement('canvas');
+        cvs.width = width;
+        cvs.height = height;
+        const ctx = cvs.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(cvs);
+      };
+      img.onerror = () => {
+        reject(new Error(`Failed to decode image "${file.name || 'photo'}". Please ensure it is a valid JPEG, PNG, or WebP file.`));
+      };
+      img.src = evt.target.result;
+    };
+    reader.onerror = () => {
+      reject(new Error(`Failed to read file "${file.name || 'photo'}".`));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function renderPdfToCanvas(pdfArrayBuffer, pageNum = 1) {
   if (!window.pdfjsLib) {
     throw new Error("PDF.js library is loading. Please try again.");
@@ -456,20 +493,34 @@ export async function processCanvasOCR(canvas, progressCallback) {
   progressCallback && progressCallback(25, "Scanning handwriting with Gemini AI Vision (5-7s)...");
 
   let scanError = null;
+  const clientKey = getGeminiApiKey();
 
-  // 1. Try backend proxy server only if running on local server
-  const isLocalServer = typeof window !== 'undefined' && (
+  // 1. Try backend proxy server if available (e.g. running on local server, LAN IP, or port 8000)
+  const isLikelyBackendHost = typeof window !== 'undefined' && (
+    window.location.port === '8000' ||
     window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1'
+    window.location.hostname === '127.0.0.1' ||
+    /^192\.168\./.test(window.location.hostname) ||
+    /^10\./.test(window.location.hostname) ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(window.location.hostname) ||
+    window.location.hostname.endsWith('.local')
   );
 
-  if (isLocalServer) {
+  if (isLikelyBackendHost) {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000);
       const response = await fetch('/api/scan-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: dataUrl, mimeType: 'image/jpeg' })
+        body: JSON.stringify({
+          image: dataUrl,
+          mimeType: 'image/jpeg',
+          apiKey: clientKey
+        }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const res = await response.json();
@@ -522,6 +573,7 @@ export async function processAllPdfPages(pdfArrayBuffer, rotation, progressCallb
 
   let rawRecords = [];
   let detectedDate = '';
+  const clientKey = getGeminiApiKey();
 
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
     progressCallback && progressCallback(
@@ -551,11 +603,15 @@ export async function processAllPdfPages(pdfArrayBuffer, rotation, progressCallb
 
     try {
       const pdfProxyCtrl = new AbortController();
-      const pdfProxyTimeout = setTimeout(() => pdfProxyCtrl.abort(), 3000);
+      const pdfProxyTimeout = setTimeout(() => pdfProxyCtrl.abort(), 45000);
       const response = await fetch('/api/scan-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: dataUrl, mimeType: 'image/jpeg' }),
+        body: JSON.stringify({
+          image: dataUrl,
+          mimeType: 'image/jpeg',
+          apiKey: clientKey
+        }),
         signal: pdfProxyCtrl.signal
       });
       clearTimeout(pdfProxyTimeout);

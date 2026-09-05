@@ -1,6 +1,6 @@
 import { calculateSummaryMetrics, parseTimeToMinutes, calculatePayroll, calculateAttendanceRecord } from './src/attendanceCalculator.js';
 import { generateAttendancePDF } from './src/pdfExporter.js';
-import { renderPdfToCanvas, rotateCanvas, processCanvasOCR, processAllPdfPages, deduplicateAndMergeRecords } from './src/ocrExtractor.js';
+import { renderPdfToCanvas, rotateCanvas, processCanvasOCR, processAllPdfPages, deduplicateAndMergeRecords, loadImageFileToCanvas } from './src/ocrExtractor.js';
 import { HANDWRITTEN_REGISTER_DATA } from './src/sampleData.js';
 
 // Application State
@@ -85,7 +85,8 @@ window.addEventListener('beforeinstallprompt', (e) => {
 function isImageFile(file) {
   if (!file) return false;
   if (file.type && file.type.startsWith('image/')) return true;
-  return /\.(jpe?g|png|webp|bmp|gif|jfif|heic|tiff?)$/i.test(file.name || '');
+  const name = (file.name || '').toLowerCase();
+  return /\.(jpe?g|png|webp|bmp|gif|jfif|heic|heif|tiff?|svg)$/i.test(name) || (file.type === '' && !name.endsWith('.pdf'));
 }
 
 // Safe JSON parser — prevents app crash if localStorage data is corrupted
@@ -689,12 +690,18 @@ function setupEventListeners() {
   }
 
   if (btnCloseGalleryModal) {
-    btnCloseGalleryModal.addEventListener('click', () => cameraGalleryModal.style.display = 'none');
+    btnCloseGalleryModal.addEventListener('click', () => {
+      cameraGalleryModal.style.display = 'none';
+      if (cameraInput) cameraInput.value = '';
+      if (cameraAppendInput) cameraAppendInput.value = '';
+    });
   }
 
   if (btnClearGallery) {
     btnClearGallery.addEventListener('click', () => {
       capturedPhotos = [];
+      if (cameraInput) cameraInput.value = '';
+      if (cameraAppendInput) cameraAppendInput.value = '';
       renderGalleryModal();
     });
   }
@@ -776,6 +783,11 @@ function setupEventListeners() {
       ocrStatus.style.display = 'none';
       if (fileInput) fileInput.value = '';
       if (cameraInput) cameraInput.value = '';
+      if (currentCanvas) {
+        currentCanvas.width = 0;
+        currentCanvas.height = 0;
+        currentCanvas = null;
+      }
     }
   });
 
@@ -783,6 +795,11 @@ function setupEventListeners() {
     docPreviewModal.style.display = 'none';
     if (fileInput) fileInput.value = '';
     if (cameraInput) cameraInput.value = '';
+    if (currentCanvas) {
+      currentCanvas.width = 0;
+      currentCanvas.height = 0;
+      currentCanvas = null;
+    }
   });
 
   const editTargetSelect = document.getElementById('edit-target-minutes');
@@ -813,7 +830,9 @@ function setupEventListeners() {
 }
 
 async function handleSingleFileSelected(file) {
-  if (file.name.toLowerCase().endsWith('.pdf')) {
+  if (!file) return;
+
+  if (file.name && file.name.toLowerCase().endsWith('.pdf')) {
     ocrStatus.style.display = 'block';
     ocrMsg.textContent = "Loading PDF Document...";
     try {
@@ -829,29 +848,27 @@ async function handleSingleFileSelected(file) {
       showToast(`PDF Error: ${err.message}`, "info");
     } finally {
       ocrStatus.style.display = 'none';
+      if (fileInput) fileInput.value = '';
     }
   } else if (isImageFile(file)) {
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const img = new Image();
-      img.onload = () => {
-        const cvs = document.createElement('canvas');
-        cvs.width = img.width; cvs.height = img.height;
-        cvs.getContext('2d').drawImage(img, 0, 0);
-        currentPdfBuffer = null;
-        currentCanvas = cvs;
-        currentRotation = 0;
-        totalPdfPages = 1;
-        showDocumentPreviewModal();
-      };
-      img.onerror = () => {
-        showToast(`Failed to load image: ${file.name}`, "info");
-      };
-      img.src = evt.target.result;
-    };
-    reader.readAsDataURL(file);
+    ocrStatus.style.display = 'block';
+    ocrMsg.textContent = "Loading and optimizing image...";
+    try {
+      const cvs = await loadImageFileToCanvas(file, 1600);
+      currentPdfBuffer = null;
+      currentCanvas = cvs;
+      currentRotation = 0;
+      totalPdfPages = 1;
+      showDocumentPreviewModal();
+    } catch (err) {
+      showToast(`Image Error: ${err.message}`, "info");
+    } finally {
+      ocrStatus.style.display = 'none';
+      if (fileInput) fileInput.value = '';
+    }
   } else {
     showToast(`Unsupported file type: ${file.name}`, "info");
+    if (fileInput) fileInput.value = '';
   }
 }
 
@@ -892,32 +909,24 @@ async function handleMultipleFilesSelected(files) {
             successfulPages++;
           }
         } else if (isImageFile(file)) {
-          const cvs = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-              const img = new Image();
-              img.onload = () => {
-                const c = document.createElement('canvas');
-                c.width = img.width; c.height = img.height;
-                c.getContext('2d').drawImage(img, 0, 0);
-                resolve(c);
-              };
-              img.onerror = () => reject(new Error(`Failed to load image ${file.name}`));
-              img.src = evt.target.result;
-            };
-            reader.onerror = () => reject(new Error(`Failed to read file ${file.name}`));
-            reader.readAsDataURL(file);
-          });
-
-          if (cvs) {
-            const scanRes = await processCanvasOCR(cvs, (prog, msg) => {
-              ocrMsg.textContent = `[Photo ${pageNumber}/${files.length}] ${msg}`;
-            });
-            if (scanRes && Array.isArray(scanRes.records) && scanRes.records.length > 0) {
-              accumulatedRecords = accumulatedRecords.concat(scanRes.records);
-              if (scanRes.reportDate && !detectedDate) detectedDate = scanRes.reportDate;
-              pageExtracted = true;
-              successfulPages++;
+          let cvs = null;
+          try {
+            cvs = await loadImageFileToCanvas(file, 1600);
+            if (cvs) {
+              const scanRes = await processCanvasOCR(cvs, (prog, msg) => {
+                ocrMsg.textContent = `[Photo ${pageNumber}/${files.length}] ${msg}`;
+              });
+              if (scanRes && Array.isArray(scanRes.records) && scanRes.records.length > 0) {
+                accumulatedRecords = accumulatedRecords.concat(scanRes.records);
+                if (scanRes.reportDate && !detectedDate) detectedDate = scanRes.reportDate;
+                pageExtracted = true;
+                successfulPages++;
+              }
+            }
+          } finally {
+            if (cvs) {
+              cvs.width = 0;
+              cvs.height = 0;
             }
           }
         }
