@@ -136,6 +136,21 @@ export function generateAttendancePDF(processedRecords, metrics, reportDate = ne
 
   // Save the generated PDF
   const filename = `Attendance_Report_${reportDate.replace(/[\/\\]/g, '-')}.pdf`;
-  doc.save(filename);
+  
+  try {
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (err) {
+    console.warn("Blob save failed, falling back to doc.save", err);
+    doc.save(filename);
+  }
+  
   return filename;
 }
