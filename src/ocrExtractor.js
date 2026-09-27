@@ -415,7 +415,9 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
 
   const models = [
     'gemini-flash-lite-latest',
+    'gemini-2.5-flash-lite',
     'gemini-flash-latest',
+    'gemini-2.5-flash',
     'gemini-3.5-flash-lite',
     'gemini-3.5-flash'
   ];
@@ -426,7 +428,7 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 25000);
+      const timeoutId = setTimeout(() => controller.abort(), 90000);
 
       const resp = await fetch(url, {
         method: 'POST',
@@ -447,8 +449,8 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
 
         // Auto-pause for rate limits (429) or temporary server errors (500/503)
         if (resp.status === 429 || resp.status >= 500) {
-          console.warn(`Model ${model} hit ${resp.status}, pausing 1.5s before fallback...`);
-          await new Promise(r => setTimeout(r, 1500));
+          console.warn(`Model ${model} hit ${resp.status}, pausing 3.5s before fallback...`);
+          await new Promise(r => setTimeout(r, 3500));
         }
 
         throw new Error(`Gemini Vision API (${model}) error: ${errMsg}`);
@@ -509,7 +511,7 @@ export async function processCanvasOCR(canvas, progressCallback) {
   if (isLikelyBackendHost) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45000);
+      const timeoutId = setTimeout(() => controller.abort(), 90000);
       const response = await fetch('/api/scan-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -603,7 +605,7 @@ export async function processAllPdfPages(pdfArrayBuffer, rotation, progressCallb
 
     try {
       const pdfProxyCtrl = new AbortController();
-      const pdfProxyTimeout = setTimeout(() => pdfProxyCtrl.abort(), 45000);
+      const pdfProxyTimeout = setTimeout(() => pdfProxyCtrl.abort(), 90000);
       const response = await fetch('/api/scan-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

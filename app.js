@@ -766,14 +766,29 @@ function setupEventListeners() {
       }
 
       if (scanResult && scanResult.records && scanResult.records.length > 0) {
-        staffRecords = scanResult.records;
-        if (scanResult.reportDate) {
+        if (staffRecords.length > 0) {
+          const shouldAppend = confirm(
+            `You already have ${staffRecords.length} staff records loaded.\n\n` +
+            `Click "OK" to COMBINE & APPEND the new ${scanResult.records.length} records (Total ~${staffRecords.length + scanResult.records.length} staff).\n\n` +
+            `Click "Cancel" to REPLACE and start fresh with this page only.`
+          );
+          if (shouldAppend) {
+            staffRecords = deduplicateAndMergeRecords(staffRecords.concat(scanResult.records));
+            showToast(`Combined pages! Tracking ${staffRecords.length} total staff members.`, "success");
+          } else {
+            staffRecords = scanResult.records;
+            showToast(`Loaded ${staffRecords.length} staff records for new report.`, "success");
+          }
+        } else {
+          staffRecords = scanResult.records;
+          showToast(`Gemini extracted ${scanResult.records.length} unique staff records! Date: ${scanResult.reportDate || 'Default'}`, "success");
+        }
+        if (scanResult.reportDate && (!reportDate || staffRecords.length === scanResult.records.length)) {
           reportDate = scanResult.reportDate;
           inputReportDate.value = reportDate;
         }
         renderApp();
         saveRosterToCache();
-        showToast(`Gemini extracted ${scanResult.records.length} unique staff records! Date: ${scanResult.reportDate || 'Default'}`, "success");
       } else {
         showToast("No records found. Try rotating the document.", "info");
       }
@@ -887,15 +902,15 @@ async function handleMultipleFilesSelected(files) {
 
     // Add safe pacing delay between consecutive requests to avoid burst rate limiting
     if (idx > 0) {
-      ocrMsg.textContent = `[Page ${pageNumber}/${files.length}] Pacing request (1s)...`;
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      ocrMsg.textContent = `[Page ${pageNumber}/${files.length}] Pacing request (2.5s)...`;
+      await new Promise(resolve => setTimeout(resolve, 2500));
     }
 
-    ocrMsg.textContent = `[Page ${pageNumber}/${files.length}] Scanning handwriting with Gemini AI Vision...`;
+    ocrMsg.textContent = `[Page ${pageNumber} of ${files.length}] Scanning handwriting with Gemini AI Vision... (${accumulatedRecords.length} staff loaded so far)`;
 
     let pageExtracted = false;
 
-    for (let attempt = 1; attempt <= 2 && !pageExtracted; attempt++) {
+    for (let attempt = 1; attempt <= 3 && !pageExtracted; attempt++) {
       try {
         if (file.name && file.name.toLowerCase().endsWith('.pdf')) {
           const arrayBuffer = await file.arrayBuffer();
@@ -932,9 +947,10 @@ async function handleMultipleFilesSelected(files) {
         }
       } catch (err) {
         console.warn(`Attempt ${attempt} for Page ${pageNumber} failed:`, err);
-        if (attempt < 2) {
-          ocrMsg.textContent = `[Page ${pageNumber}/${files.length}] Retrying scan (1.5s)...`;
-          await new Promise(r => setTimeout(r, 1500));
+        if (attempt < 3) {
+          const waitSecs = attempt * 2;
+          ocrMsg.textContent = `[Page ${pageNumber}/${files.length}] Retrying scan in ${waitSecs}s...`;
+          await new Promise(r => setTimeout(r, waitSecs * 1000));
         }
       }
     }
@@ -953,12 +969,27 @@ async function handleMultipleFilesSelected(files) {
   if (accumulatedRecords.length > 0) {
     const uniqueRecords = deduplicateAndMergeRecords(accumulatedRecords);
     
-    // In batch file upload, replace roster freshly with the document's records
-    staffRecords = uniqueRecords;
-    if (failedPages.length > 0) {
-      showToast(`Scanned ${successfulPages}/${files.length} pages (Total: ${staffRecords.length} staff). Note: Page ${failedPages.join(', ')} failed — you can upload it to append!`, "warning");
+    if (staffRecords.length > 0) {
+      const shouldAppend = confirm(
+        `Scanned ${successfulPages}/${files.length} pages (${uniqueRecords.length} staff records).\n\n` +
+        `You already have ${staffRecords.length} staff loaded in the active report.\n\n` +
+        `Click "OK" to COMBINE & APPEND to your existing list (Total ~${staffRecords.length + uniqueRecords.length}).\n\n` +
+        `Click "Cancel" to REPLACE and use only these ${uniqueRecords.length} records.`
+      );
+      if (shouldAppend) {
+        staffRecords = deduplicateAndMergeRecords(staffRecords.concat(uniqueRecords));
+        showToast(`Combined! Now tracking ${staffRecords.length} total staff members.`, "success");
+      } else {
+        staffRecords = uniqueRecords;
+        showToast(`Loaded ${staffRecords.length} staff records from ${successfulPages} pages.`, "success");
+      }
     } else {
-      showToast(`Scanned all ${files.length} pages! Formatted ${staffRecords.length} staff members.`, "success");
+      staffRecords = uniqueRecords;
+      if (failedPages.length > 0) {
+        showToast(`Scanned ${successfulPages}/${files.length} pages (Total: ${staffRecords.length} staff). Note: Page ${failedPages.join(', ')} failed.`, "warning");
+      } else {
+        showToast(`Scanned all ${files.length} pages! Formatted ${staffRecords.length} staff members.`, "success");
+      }
     }
 
     if (detectedDate) {

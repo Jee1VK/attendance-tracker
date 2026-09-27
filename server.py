@@ -115,7 +115,9 @@ def scan_with_gemini_vision(image_base64, mime_type='image/png', api_key=None):
 
     models = [
         'gemini-flash-lite-latest',
+        'gemini-2.5-flash-lite',
         'gemini-flash-latest',
+        'gemini-2.5-flash',
         'gemini-3.5-flash-lite',
         'gemini-3.5-flash'
     ]
@@ -229,7 +231,8 @@ Return raw JSON only, no backticks, no markdown.
                         pass
 
             if not parsed:
-                return {'records': [], 'reportDate': ''}
+                print(f"[Gemini Vision] Warning: Could not parse JSON from {model}, trying fallback model...")
+                continue
 
             raw_records = []
             report_date = ''
@@ -264,8 +267,14 @@ Return raw JSON only, no backticks, no markdown.
                         'finalOut': final_out
                     })
 
-            return {'records': cleaned, 'reportDate': report_date}
+            if cleaned:
+                return {'records': cleaned, 'reportDate': report_date}
 
+        except urllib.error.HTTPError as e:
+            print(f"[Gemini Vision] HTTP Error {e.code} with {model}: {e.reason}")
+            if e.code == 429:
+                import time
+                time.sleep(3)
         except Exception as e:
             print(f"[Gemini Vision] Error with {model}: {e}")
 
