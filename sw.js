@@ -1,6 +1,6 @@
 // Service Worker for Staff Attendance Tracker PWA
 // Network-first strategy: always fetch fresh content when online, fall back to cache when offline
-const CACHE_VERSION = '1.2.6';
+const CACHE_VERSION = '1.2.7';
 const CACHE_NAME = `attendance-tracker-v${CACHE_VERSION}`;
 const ASSETS_TO_CACHE = [
   './',
@@ -38,13 +38,20 @@ self.addEventListener('activate', (evt) => {
 
 self.addEventListener('fetch', (evt) => {
   if (evt.request.method !== 'GET') return;
+  // Skip cross-origin requests (CDN libs) — let the browser handle them normally
+  const url = new URL(evt.request.url);
+  if (url.origin !== self.location.origin) return;
+
   evt.respondWith(
     fetch(evt.request)
       .then((networkRes) => {
-        const resClone = networkRes.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(evt.request, resClone);
-        });
+        // Only cache successful responses to avoid poisoning cache with 404/500 errors
+        if (networkRes.ok) {
+          const resClone = networkRes.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(evt.request, resClone);
+          });
+        }
         return networkRes;
       })
       .catch(() => {

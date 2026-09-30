@@ -730,17 +730,25 @@ function setupEventListeners() {
 
   btnPrevPage.addEventListener('click', async () => {
     if (currentPdfBuffer && currentPdfPage > 1) {
-      currentPdfPage--;
-      const { canvas } = await renderPdfToCanvas(currentPdfBuffer, currentPdfPage);
-      currentCanvas = canvas; currentRotation = 0; updateCanvasPreview();
+      try {
+        currentPdfPage--;
+        const { canvas } = await renderPdfToCanvas(currentPdfBuffer, currentPdfPage);
+        currentCanvas = canvas; currentRotation = 0; updateCanvasPreview();
+      } catch (err) {
+        showToast(`PDF Page Error: ${err.message}`, "info");
+      }
     }
   });
 
   btnNextPage.addEventListener('click', async () => {
     if (currentPdfBuffer && currentPdfPage < totalPdfPages) {
-      currentPdfPage++;
-      const { canvas } = await renderPdfToCanvas(currentPdfBuffer, currentPdfPage);
-      currentCanvas = canvas; currentRotation = 0; updateCanvasPreview();
+      try {
+        currentPdfPage++;
+        const { canvas } = await renderPdfToCanvas(currentPdfBuffer, currentPdfPage);
+        currentCanvas = canvas; currentRotation = 0; updateCanvasPreview();
+      } catch (err) {
+        showToast(`PDF Page Error: ${err.message}`, "info");
+      }
     }
   });
 
@@ -1162,9 +1170,12 @@ function openWhatsAppModal() {
   const lateInStaff = processedRecords.filter(r => r.isLateIn && !r.isAbsent);
   const absentees = processedRecords.filter(r => r.isAbsent);
 
-  const hrs = Math.floor(expectedInMinutes / 60);
-  const mins = expectedInMinutes % 60;
-  const timeStr = `${hrs}:${mins === 0 ? '00' : (mins < 10 ? '0' + mins : mins)} AM`;
+  let dispHrs = Math.floor(expectedInMinutes / 60);
+  const dispMins = expectedInMinutes % 60;
+  const dispAmpm = dispHrs >= 12 ? 'PM' : 'AM';
+  if (dispHrs > 12) dispHrs -= 12;
+  if (dispHrs === 0) dispHrs = 12;
+  const timeStr = `${dispHrs}:${dispMins === 0 ? '00' : (dispMins < 10 ? '0' + dispMins : dispMins)} ${dispAmpm}`;
 
   let msg = `📊 *DAILY STAFF ATTENDANCE REPORT*\n📅 Date: ${inputReportDate.value || reportDate}\n⏱ Shift Target: ${(targetMinutes/60).toFixed(1)} Hours | Grace: ${graceMinutes} Mins\n------------------------------------\n`;
   msg += `👥 Total: ${metrics.totalStaff} | ✅ Present: ${metrics.presentCount} | ❌ Absent: ${metrics.absentCount}\n`;
@@ -1346,6 +1357,7 @@ function checkDiscrepancies(processedRecords) {
   // Render pattern alerts list
   discrepancyList.innerHTML = '';
   discrepancyBadge.textContent = `${patternAlerts.length} Pattern${patternAlerts.length === 1 ? '' : 's'} Flagged`;
+  discrepancyBadge.setAttribute('data-count', patternAlerts.length);
 
   if (patternAlerts.length === 0) {
     discrepancyPanel.style.display = 'none';
@@ -1385,8 +1397,9 @@ function checkDiscrepancies(processedRecords) {
     dismissBtn.textContent = 'Dismiss';
     dismissBtn.onclick = () => {
       row.remove();
-      const currentCount = parseInt(discrepancyBadge.textContent, 10);
-      const remaining = currentCount - 1;
+      let remaining = parseInt(discrepancyBadge.getAttribute('data-count') || '0', 10) - 1;
+      if (remaining < 0) remaining = 0;
+      discrepancyBadge.setAttribute('data-count', remaining);
       discrepancyBadge.textContent = `${remaining} Pattern${remaining === 1 ? '' : 's'} Flagged`;
       if (remaining === 0) {
         discrepancyPanel.style.display = 'none';
@@ -1460,6 +1473,15 @@ function addMasterStaffName() {
 /* ==========================================================================
    FEATURE 3 & 4: MONTHLY ATTENDANCE & PAYROLL MATRIX LOGIC
    ========================================================================== */
+
+/**
+ * WARNING (v1.2.7 Audit): 
+ * `renderMonthlyMatrix` dynamically re-calculates `isLateIn` and `isShortfall`
+ * for ALL historical days using the CURRENT global settings (targetMinutes, graceMinutes).
+ * If you change the expected shift time or target hours today, it will retroactively 
+ * alter the payroll data for all past days in the month. 
+ * A future database schema update should lock in daily rules per-record.
+ */
 function renderMonthlyMatrix() {
   const tableBody = document.getElementById('matrix-table-body');
   if (!tableBody) return;
