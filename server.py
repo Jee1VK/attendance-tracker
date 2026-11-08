@@ -51,6 +51,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 image_base64 = data.get('image', '')
                 mime_type = data.get('mimeType', 'image/png')
                 client_api_key = (data.get('apiKey') or '').strip()
+                master_directory = data.get('masterDirectory', [])
+                model_mode = data.get('modelMode', 'flash')
 
                 if ',' in image_base64:
                     header_part = image_base64.split(',', 1)[0]
@@ -59,8 +61,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     if mime_match:
                         mime_type = mime_match.group(1)
 
-                print(f"[Gemini Vision] Scanning handwritten document ({len(image_base64)//1024} KB)...")
-                scan_result = scan_with_gemini_vision(image_base64, mime_type, api_key=client_api_key)
+                print(f"[Gemini Vision] Scanning handwritten document ({len(image_base64)//1024} KB) | Mode: {model_mode}...")
+                scan_result = scan_with_gemini_vision(
+                    image_base64,
+                    mime_type,
+                    api_key=client_api_key,
+                    master_directory=master_directory,
+                    model_mode=model_mode
+                )
 
                 records = scan_result.get('records', [])
                 report_date = scan_result.get('reportDate', '')
@@ -108,53 +116,75 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
 
-def scan_with_gemini_vision(image_base64, mime_type='image/png', api_key=None):
+def scan_with_gemini_vision(image_base64, mime_type='image/png', api_key=None, master_directory=None, model_mode='flash'):
     active_key = (api_key or '').strip() or GEMINI_API_KEY
     if not active_key:
         return {'records': [], 'reportDate': ''}
 
-    models = [
-        'gemini-flash-lite-latest',
-        'gemini-2.5-flash-lite',
-        'gemini-flash-latest',
-        'gemini-2.5-flash',
-        'gemini-3.5-flash-lite',
-        'gemini-3.5-flash'
-    ]
+    if model_mode == 'pro':
+        models = [
+            'gemini-2.5-pro',
+            'gemini-1.5-pro',
+            'gemini-2.5-flash',
+            'gemini-flash-latest',
+            'gemini-flash-lite-latest'
+        ]
+    else:
+        models = [
+            'gemini-2.5-flash',
+            'gemini-flash-latest',
+            'gemini-2.5-flash-lite',
+            'gemini-flash-lite-latest',
+            'gemini-1.5-pro',
+            'gemini-2.5-pro'
+        ]
 
-    prompt = """You are an expert OCR vision AI specializing in reading handwritten and printed daily staff attendance registers.
+    master_roster_grounding = ""
+    if master_directory and isinstance(master_directory, list) and len(master_directory) > 0:
+        names_json = json.dumps(master_directory)
+        master_roster_grounding = f"""
+
+OFFICIAL MASTER STAFF ROSTER ({len(master_directory)} enrolled employees):
+{names_json}
+GROUNDING RULE FOR STAFF NAMES:
+When reading cursive, hasty, or faint handwriting in Column 2 (NAME), strongly prioritize matching against this official master staff roster when visually plausible. Do not invent arbitrary names not present in the register."""
+
+    prompt = f"""You are an expert OCR vision AI specializing in reading handwritten and printed daily staff attendance registers.
 
 CRITICAL RULES & ANTI-HALLUCINATION INSTRUCTIONS:
 1. Column 2 is labeled "NAME". Transcribe the staff name ONLY from Column 2.
    - DO NOT read names from the "IN/SIGN" or "OUT SIGN" signature columns!
-   - NEVER hallucinate, guess, or invent staff names (e.g. do NOT invent CHANDRA, DEEPA, GIRISH, KAVYA, KUMAR, LAKSHMI, MOHAN, NAGARAJ, POOJA)! Only output names that are clearly written in Column 2.
+   - NEVER hallucinate, guess, or invent staff names. Only output names that are clearly written in Column 2.
    - If a row has a serial number but no staff name is printed/written, SKIP that row completely!
+   - Preserve single-letter initials (e.g. "KUMAR S", "BALAJI H", "DEVARAJ N T").
 2. Multi-Page Support:
-   - This image is part of an attendance register. It may contain:
-     * Page 1 (Sl No 1 to 20)
-     * Page 2 (Sl No 21 to 40)
-     * Page 3 (Sl No 41 to 60)
-   - Extract every valid staff row visible on this page.
-3. For each row:
+   - This image is part of an attendance register. Extract every valid staff row visible on this page.
+3. Handwritten Notation & Idiosyncrasy Rules:
+   - Time Notations: Convert handwritten decimal dots or dashes like "10.45", "10-45", "10=45" into standard time "10:45".
+   - Ditto Marks: Marks like '"', ',,', or '-do-' in a time cell mean copy the exact time from the row directly above it.
+   - Corrected/Overwritten Numbers: If a time was struck through with a line and rewritten, transcribe the final corrected time.
+   - Absent Marks: If marked "A", "Ab", "Abs", "Absent", "L", "CL", "SL", "WO", "Off", output "AB" in the "in" column.
+   - Half Day Marks: If marked "HD", "H.D", or "Half Day", record "Half day" in "remarks".
+4. For each row:
    - "slNo": The integer serial number printed on this sheet (e.g. 1..20, 21..40, 41..60).
-   - "name": Exact printed or written staff name in UPPERCASE from Column 2 (e.g. "ANANDAMMA", "ARUNKUMAR J", "B M SUHAS", "BABY G", "BALAJI H", "RAVI M", "RAVISH P M", "RAJESHWARI S", "SHOBHA", "SHRUTHI C", "SRIDHAR S", "SRIKANTA DATTA", "SRINIVAS D A", "SUSHMITHA", "SURESH C", "VEENA K S", "VARADHA RAJAN", "VENKATESH BABU", etc.).
-   - "in": Punch IN time (e.g. "10:45", "10:38", "11:12", "09:55", "11:24", "10:29", "12:30", "11:20") or "AB" if marked Ab/Absent.
-   - "out1": 1st Out break time. Convert notations like "2-05", "2.05", "2=05", "12-07" to afternoon format e.g. "02:05 PM", "12:07 PM", or "" if blank.
+   - "name": Exact printed or written staff name in UPPERCASE from Column 2.
+   - "in": Punch IN time (e.g. "10:45", "10:38", "11:12", "09:55", "11:24") or "AB" if absent.
+   - "out1": 1st Out break time. Convert notations like "2-05", "2.05", "12-07" to afternoon format e.g. "02:05 PM", "12:07 PM", or "" if blank.
    - "in1": 1st In break time. Convert notations like "2-50", "12-40" to "02:50 PM", "12:40 PM", or "" if blank.
-   - "out2": 2nd Out break time (e.g. "01:36 PM", "04:58 PM", "03:00 PM") or "" if blank.
-   - "in2": 2nd In break time (e.g. "02:07 PM", "05:07 PM", "03:34 PM") or "" if blank.
-   - "out3": 3rd Out break time (e.g. "04:58 PM", "05:43 PM") or "" if blank.
-   - "in3": 3rd In break time (e.g. "05:07 PM", "06:18 PM") or "" if blank.
-   - "finalOut": Final Out punch time. IMPORTANT: Evening punch out times MUST have "PM" attached (e.g. "7:30" -> "07:30 PM", "8:12" -> "08:12 PM", "8:31" -> "08:31 PM", "9:30" -> "09:30 PM", "8:28" -> "08:28 PM"). If absent, output "AB". If blank/left without punch, output "NOTPUNCHED".
-   - "remarks": If marked "Half day" or any special remark in handwriting, include it in "remarks" (e.g. "Half day").
-4. Extract the date at the top of the register into "reportDate" (e.g. "03/09/2026 THURSDAY").
+   - "out2": 2nd Out break time (e.g. "01:36 PM", "04:58 PM") or "" if blank.
+   - "in2": 2nd In break time (e.g. "02:07 PM", "05:07 PM") or "" if blank.
+   - "out3": 3rd Out break time or "" if blank.
+   - "in3": 3rd In break time or "" if blank.
+   - "finalOut": Final Out punch time with "PM" attached (e.g. "7:30" -> "07:30 PM", "8:12" -> "08:12 PM"). If absent, output "AB". If blank/left without punch, output "NOTPUNCHED".
+   - "remarks": Any handwritten remark (e.g. "Half day", "Permission") or "".
+5. Extract the date at the top of the register into "reportDate" (e.g. "03/09/2026 THURSDAY").{master_roster_grounding}
 
 OUTPUT FORMAT:
 Return pure JSON only matching this schema:
-{
+{{
   "reportDate": "03/09/2026 THURSDAY",
   "records": [
-    {
+    {{
       "slNo": 1,
       "name": "ANANDAMMA",
       "in": "10:45",
@@ -166,9 +196,9 @@ Return pure JSON only matching this schema:
       "in3": "",
       "finalOut": "07:30 PM",
       "remarks": ""
-    }
+    }}
   ]
-}
+}}
 Return raw JSON only, no backticks, no markdown.
 """
 
@@ -188,7 +218,7 @@ Return raw JSON only, no backticks, no markdown.
         ],
         "generationConfig": {
             "temperature": 0.1,
-            "maxOutputTokens": 8192,
+            "maxOutputTokens": 16384,
             "responseMimeType": "application/json"
         }
     }

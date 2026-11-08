@@ -1,6 +1,6 @@
 import { calculateSummaryMetrics, parseTimeToMinutes, calculatePayroll, calculateAttendanceRecord } from './src/attendanceCalculator.js';
 import { generateAttendancePDF } from './src/pdfExporter.js';
-import { renderPdfToCanvas, rotateCanvas, processCanvasOCR, processAllPdfPages, deduplicateAndMergeRecords, loadImageFileToCanvas, fuzzyMatchMasterName } from './src/ocrExtractor.js';
+import { renderPdfToCanvas, rotateCanvas, processCanvasOCR, processAllPdfPages, deduplicateAndMergeRecords, loadImageFileToCanvas, fuzzyMatchMasterName, enhanceDocumentContrast } from './src/ocrExtractor.js';
 import { HANDWRITTEN_REGISTER_DATA } from './src/sampleData.js';
 
 // Application State
@@ -20,6 +20,7 @@ let currentPdfPage = 1;
 let totalPdfPages = 1;
 let currentCanvas = null;
 let currentRotation = 0;
+let isContrastEnhanced = false;
 
 // Multi-Photo Camera Gallery Session State
 let capturedPhotos = [];
@@ -447,6 +448,7 @@ function setupEventListeners() {
   const btnApiKey = document.getElementById('btn-api-key');
   const apiKeyModal = document.getElementById('api-key-modal');
   const inputGeminiKey = document.getElementById('input-gemini-key');
+  const selectModelMode = document.getElementById('select-model-mode');
   const btnSaveKey = document.getElementById('btn-save-key');
   const btnClearKey = document.getElementById('btn-clear-key');
   const btnCloseKeyModal = document.getElementById('btn-close-key-modal');
@@ -454,6 +456,9 @@ function setupEventListeners() {
   if (btnApiKey && apiKeyModal) {
     btnApiKey.addEventListener('click', () => {
       inputGeminiKey.value = localStorage.getItem('gemini_api_key') || '';
+      if (selectModelMode) {
+        selectModelMode.value = localStorage.getItem('gemini_model_mode') || 'flash';
+      }
       apiKeyModal.style.display = 'flex';
       inputGeminiKey.focus();
     });
@@ -470,6 +475,9 @@ function setupEventListeners() {
       } else {
         localStorage.removeItem('gemini_api_key');
         showToast("Gemini API Key cleared.", "info");
+      }
+      if (selectModelMode) {
+        localStorage.setItem('gemini_model_mode', selectModelMode.value);
       }
       apiKeyModal.style.display = 'none';
     });
@@ -779,6 +787,23 @@ function setupEventListeners() {
   document.getElementById('btn-rotate-left').addEventListener('click', () => { currentRotation = ((currentRotation - 90) % 360 + 360) % 360; updateCanvasPreview(); });
   document.getElementById('btn-rotate-right').addEventListener('click', () => { currentRotation = ((currentRotation + 90) % 360 + 360) % 360; updateCanvasPreview(); });
 
+  const btnEnhanceContrast = document.getElementById('btn-enhance-contrast');
+  if (btnEnhanceContrast) {
+    btnEnhanceContrast.addEventListener('click', () => {
+      isContrastEnhanced = !isContrastEnhanced;
+      if (isContrastEnhanced) {
+        btnEnhanceContrast.style.background = 'rgba(56, 189, 248, 0.2)';
+        btnEnhanceContrast.style.borderColor = '#38bdf8';
+        showToast("Ink contrast enhanced! Faded strokes sharpened.", "info");
+      } else {
+        btnEnhanceContrast.style.background = '';
+        btnEnhanceContrast.style.borderColor = '';
+        showToast("Restored original image contrast.", "info");
+      }
+      updateCanvasPreview();
+    });
+  }
+
   btnPrevPage.addEventListener('click', async () => {
     if (currentPdfBuffer && currentPdfPage > 1) {
       try {
@@ -819,7 +844,8 @@ function setupEventListeners() {
       } else {
         ocrMsg.textContent = "Sending to Gemini AI Vision for handwriting recognition...";
         const rotatedCvs = rotateCanvas(currentCanvas, currentRotation);
-        scanResult = await processCanvasOCR(rotatedCvs, (progress, msg) => {
+        const finalCvs = isContrastEnhanced ? enhanceDocumentContrast(rotatedCvs) : rotatedCvs;
+        scanResult = await processCanvasOCR(finalCvs, (progress, msg) => {
           ocrMsg.textContent = msg;
         });
       }
@@ -867,6 +893,12 @@ function setupEventListeners() {
 
   document.getElementById('btn-close-doc-modal').addEventListener('click', () => {
     docPreviewModal.style.display = 'none';
+    isContrastEnhanced = false;
+    const btnEnhance = document.getElementById('btn-enhance-contrast');
+    if (btnEnhance) {
+      btnEnhance.style.background = '';
+      btnEnhance.style.borderColor = '';
+    }
     if (fileInput) fileInput.value = '';
     if (cameraInput) cameraInput.value = '';
     if (currentCanvas) {
@@ -1129,11 +1161,23 @@ function exportAttendanceCSV(processedRecords, metrics, reportDate) {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-function showDocumentPreviewModal() { updateCanvasPreview(); docPreviewModal.style.display = 'flex'; }
+function showDocumentPreviewModal() {
+  isContrastEnhanced = false;
+  const btnEnhance = document.getElementById('btn-enhance-contrast');
+  if (btnEnhance) {
+    btnEnhance.style.background = '';
+    btnEnhance.style.borderColor = '';
+  }
+  updateCanvasPreview();
+  docPreviewModal.style.display = 'flex';
+}
 
 function updateCanvasPreview() {
   if (!currentCanvas) return;
-  const targetCvs = rotateCanvas(currentCanvas, currentRotation);
+  let targetCvs = rotateCanvas(currentCanvas, currentRotation);
+  if (isContrastEnhanced) {
+    targetCvs = enhanceDocumentContrast(targetCvs);
+  }
   previewCanvas.width = targetCvs.width;
   previewCanvas.height = targetCvs.height;
   previewCanvas.getContext('2d').drawImage(targetCvs, 0, 0);
@@ -1319,12 +1363,14 @@ function checkDiscrepancies(processedRecords) {
 
   // 1. Identify missing punch out, invalid times, and unclosed breaks today
   processedRecords.forEach((r) => {
+    const origIdx = r._originalIndex !== undefined ? r._originalIndex : -1;
     if (r.isNotPunched) {
       patternAlerts.push({
         category: 'Missing Check-Out',
         severity: 'warning',
         icon: 'fa-solid fa-clock-rotate-left',
-        message: `${r.name}: Check-out punch time is missing today (marked NOTPUNCHED).`
+        message: `${r.name}: Check-out punch time is missing today (marked NOTPUNCHED).`,
+        recordIndex: origIdx
       });
     }
 
@@ -1333,7 +1379,8 @@ function checkDiscrepancies(processedRecords) {
         category: 'Invalid Punch Time',
         severity: 'danger',
         icon: 'fa-solid fa-triangle-exclamation',
-        message: `${r.name}: Punch IN/OUT time format could not be parsed ("${r.in || '-'}" / "${r.finalOut || '-'}").`
+        message: `${r.name}: Punch IN/OUT time format could not be parsed ("${r.in || '-'}" / "${r.finalOut || '-'}").`,
+        recordIndex: origIdx
       });
     }
 
@@ -1346,7 +1393,8 @@ function checkDiscrepancies(processedRecords) {
         category: 'Unclosed Break Punch',
         severity: 'warning',
         icon: 'fa-solid fa-pause',
-        message: `${r.name}: Break punch missing in/out time (has step-out time without return-in time, or vice versa).`
+        message: `${r.name}: Break punch missing in/out time (has step-out time without return-in time, or vice versa).`,
+        recordIndex: origIdx
       });
     }
   });
@@ -1494,6 +1542,19 @@ function checkDiscrepancies(processedRecords) {
     leftContainer.appendChild(categoryTag);
     leftContainer.appendChild(textSpan);
 
+    const btnGroup = document.createElement('div');
+    btnGroup.style.cssText = 'display: flex; gap: 6px; align-items: center;';
+
+    if (item.recordIndex !== undefined && item.recordIndex >= 0) {
+      const fixBtn = document.createElement('button');
+      fixBtn.className = 'btn btn-outline';
+      fixBtn.style.cssText = 'padding: 3px 8px; font-size: 0.75rem; border-color: #38bdf8; color: #38bdf8;';
+      fixBtn.innerHTML = '<i class="fa-solid fa-pen-to-square"></i> Fix';
+      fixBtn.title = 'Edit staff record';
+      fixBtn.onclick = () => openEditModal(item.recordIndex);
+      btnGroup.appendChild(fixBtn);
+    }
+
     const dismissBtn = document.createElement('button');
     dismissBtn.className = 'btn btn-outline';
     dismissBtn.style.cssText = 'padding: 3px 8px; font-size: 0.75rem; border-color: var(--border-color); color: var(--text-muted);';
@@ -1508,9 +1569,10 @@ function checkDiscrepancies(processedRecords) {
         discrepancyPanel.style.display = 'none';
       }
     };
+    btnGroup.appendChild(dismissBtn);
 
     row.appendChild(leftContainer);
-    row.appendChild(dismissBtn);
+    row.appendChild(btnGroup);
     discrepancyList.appendChild(row);
   });
 

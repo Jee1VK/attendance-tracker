@@ -103,7 +103,7 @@
         <div class="brand-title">
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <h1 style="margin: 0;">Staff Attendance Tracking App</h1>
-            <span class="header-version-tag" id="header-version-tag" title="Click to check for latest updates" style="cursor: pointer;"><i class="fa-solid fa-rotate" style="font-size: 0.65rem;"></i> v1.2.9</span>
+            <span class="header-version-tag" id="header-version-tag" title="Click to check for latest updates" style="cursor: pointer;"><i class="fa-solid fa-rotate" style="font-size: 0.65rem;"></i> v1.3.0</span>
           </div>
           <p>Instant AI Conversion • Direct Camera Capture • Excel & PDF Export • WhatsApp Share</p>
         </div>
@@ -254,9 +254,12 @@
         </div>
 
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-          <div style="display: flex; gap: 8px; align-items: center;">
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
             <button id="btn-rotate-left" class="btn btn-outline"><i class="fa-solid fa-rotate-left"></i> Rotate Left 90°</button>
             <button id="btn-rotate-right" class="btn btn-outline"><i class="fa-solid fa-rotate-right"></i> Rotate Right 90°</button>
+            <button id="btn-enhance-contrast" class="btn btn-outline" style="border-color: #38bdf8; color: #7dd3fc;" title="Enhance ink darkness and paper contrast for cleaner AI scan">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Enhance Ink Contrast
+            </button>
             <span id="page-indicator" style="font-size: 0.8125rem; color: var(--text-muted); margin-left: 8px;">Page 1 of 1</span>
           </div>
 
@@ -394,7 +397,7 @@
         <span>Staff Attendance Tracking App</span>
       </div>
       <div class="footer-right">
-        <span class="app-version-badge" id="app-version-badge"><i class="fa-solid fa-code-branch"></i> v1.2.9</span>
+        <span class="app-version-badge" id="app-version-badge"><i class="fa-solid fa-code-branch"></i> v1.3.0</span>
       </div>
     </footer>
   </div>
@@ -585,6 +588,15 @@
         <div class="form-group full-width">
           <label for="input-gemini-key">API Key</label>
           <input type="text" id="input-gemini-key" placeholder="AIzaSy... or AQ.Ab..." style="width: 100%; font-family: monospace; font-size: 0.875rem;">
+        </div>
+        <div class="form-group full-width" style="margin-top: 14px;">
+          <label for="select-model-mode" style="font-size: 0.8125rem; font-weight: 600; color: var(--text-main); margin-bottom: 6px; display: block;">
+            <i class="fa-solid fa-microchip" style="color: #38bdf8;"></i> AI Recognition Engine
+          </label>
+          <select id="select-model-mode" style="width: 100%; padding: 8px 12px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.875rem;">
+            <option value="flash">Gemini 2.5 Flash — Ultra-Fast (Recommended, 3-5s)</option>
+            <option value="pro">Gemini 2.5 Pro — Deep Reasoning (Best for faint pencil & cursive handwriting)</option>
+          </select>
         </div>
         <div style="margin-top: 10px; font-size: 0.8125rem; color: var(--text-muted);">
           Don't have a key? <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: var(--accent-secondary); text-decoration: underline;">Get free API key from Google AI Studio</a>

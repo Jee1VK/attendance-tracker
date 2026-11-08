@@ -123,7 +123,7 @@ export function deduplicateAndMergeRecords(records) {
   return uniqueList;
 }
 
-export function resizeCanvasIfNeeded(sourceCanvas, maxDimension = 1600) {
+export function resizeCanvasIfNeeded(sourceCanvas, maxDimension = 1800) {
   let width = sourceCanvas.width;
   let height = sourceCanvas.height;
 
@@ -143,11 +143,68 @@ export function resizeCanvasIfNeeded(sourceCanvas, maxDimension = 1600) {
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(sourceCanvas, 0, 0, width, height);
   return canvas;
 }
 
-export function loadImageFileToCanvas(file, maxDimension = 1600) {
+/**
+ * Fast client-side document scanner enhancement filter.
+ * Dynamically stretches luminance range, suppresses paper background shadows/yellowing,
+ * and deepens handwritten pen/pencil strokes.
+ */
+export function enhanceDocumentContrast(sourceCanvas) {
+  const canvas = document.createElement('canvas');
+  canvas.width = sourceCanvas.width;
+  canvas.height = sourceCanvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(sourceCanvas, 0, 0);
+
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imgData.data;
+  const len = data.length;
+
+  // Step 1: Sample histogram to find min and max luminance percentiles
+  const step = Math.max(1, Math.floor(len / 40000)) * 4;
+  let minLum = 255;
+  let maxLum = 0;
+
+  for (let i = 0; i < len; i += step) {
+    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    if (lum < minLum) minLum = lum;
+    if (lum > maxLum) maxLum = lum;
+  }
+
+  // Ensure reasonable dynamic range
+  if (maxLum - minLum < 30) {
+    minLum = Math.max(0, minLum - 20);
+    maxLum = Math.min(255, maxLum + 20);
+  }
+
+  const range = (maxLum - minLum) || 1;
+
+  // Step 2: Auto-levels + gamma curve to push paper background to clean white and deepen ink strokes
+  const lut = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) {
+    let norm = (i - minLum) / range;
+    norm = Math.min(1, Math.max(0, norm));
+    // Apply contrast curve (gamma 1.25) to deepen handwriting ink
+    const curved = Math.pow(norm, 1.25);
+    lut[i] = Math.round(curved * 255);
+  }
+
+  for (let i = 0; i < len; i += 4) {
+    data[i] = lut[data[i]];
+    data[i + 1] = lut[data[i + 1]];
+    data[i + 2] = lut[data[i + 2]];
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  return canvas;
+}
+
+export function loadImageFileToCanvas(file, maxDimension = 1800) {
   return new Promise((resolve, reject) => {
     if (!file) return reject(new Error("No file selected."));
     const reader = new FileReader();
@@ -384,33 +441,50 @@ export async function directGeminiVisionScan(base64Image) {
 
   apiKey = apiKey.trim().replace(/^["']|["']$/g, '');
   const cleanBase64 = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
+
+  // Retrieve Master Staff Directory names to ground the vision AI
+  let masterRosterGrounding = '';
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const masterDir = JSON.parse(localStorage.getItem('attendance_master_directory') || '[]');
+      if (Array.isArray(masterDir) && masterDir.length > 0) {
+        masterRosterGrounding = `\n\nOFFICIAL MASTER STAFF ROSTER (${masterDir.length} enrolled employees):
+${JSON.stringify(masterDir)}
+GROUNDING RULE FOR STAFF NAMES:
+When transcribing cursive, hasty, or faint handwriting in Column 2 (NAME), strongly prioritize matching against this official master staff roster when visually plausible. Do not invent arbitrary names not present in the register.`;
+      }
+    }
+  } catch (e) {}
   
   const prompt = `You are an expert OCR vision AI specializing in reading handwritten and printed daily staff attendance registers.
 
 CRITICAL RULES & ANTI-HALLUCINATION INSTRUCTIONS:
 1. Column 2 is labeled "NAME". Transcribe the staff name ONLY from Column 2.
    - DO NOT read names from the "IN/SIGN" or "OUT SIGN" signature columns!
-   - NEVER hallucinate, guess, or invent staff names (e.g. do NOT invent CHANDRA, DEEPA, GIRISH, KAVYA, KUMAR, LAKSHMI, MOHAN, NAGARAJ, POOJA)! Only output names that are clearly written in Column 2.
+   - NEVER hallucinate, guess, or invent staff names. Only output names that are clearly written in Column 2.
    - If a row has a serial number but no staff name is printed/written, SKIP that row completely!
+   - Preserve single-letter initials (e.g. "KUMAR S", "BALAJI H", "DEVARAJ N T").
 2. Multi-Page Support:
-   - This image is part of an attendance register. It may contain:
-     * Page 1 (Sl No 1 to 20)
-     * Page 2 (Sl No 21 to 40)
-     * Page 3 (Sl No 41 to 60)
-   - Extract every valid staff row visible on this page.
-3. For each row:
+   - This image is part of an attendance register. Extract every valid staff row visible on this page.
+3. Handwritten Notation & Idiosyncrasy Rules:
+   - Time Notations: Convert handwritten decimal dots or dashes like "10.45", "10-45", "10=45" into standard time "10:45".
+   - Ditto Marks: Marks like '"', ',,', or '-do-' in a time cell mean copy the exact time from the row directly above it.
+   - Corrected/Overwritten Numbers: If a time was struck through with a line and rewritten, transcribe the final corrected time.
+   - Absent Marks: If marked "A", "Ab", "Abs", "Absent", "L", "CL", "SL", "WO", "Off", output "AB" in the "in" column.
+   - Half Day Marks: If marked "HD", "H.D", or "Half Day", record "Half day" in "remarks".
+4. For each row:
    - "slNo": The integer serial number printed on this sheet (e.g. 1..20, 21..40, 41..60).
-   - "name": Exact printed or written staff name in UPPERCASE from Column 2 (e.g. "ANANDAMMA", "ARUNKUMAR J", "B M SUHAS", "BABY G", "BALAJI H", "RAVI M", "RAVISH P M", "RAJESHWARI S", "SHOBHA", "SHRUTHI C", "SRIDHAR S", "SRIKANTA DATTA", "SRINIVAS D A", "SUSHMITHA", "SURESH C", "VEENA K S", "VARADHA RAJAN", "VENKATESH BABU", etc.).
-   - "in": Punch IN time (e.g. "10:45", "10:38", "11:12", "09:55", "11:24", "10:29", "12:30", "11:20") or "AB" if marked Ab/Absent.
-   - "out1": 1st Out break time. Convert notations like "2-05", "2.05", "2=05", "12-07" to afternoon format e.g. "02:05 PM", "12:07 PM", or "" if blank.
+   - "name": Exact printed or written staff name in UPPERCASE from Column 2.
+   - "in": Punch IN time (e.g. "10:45", "10:38", "11:12", "09:55", "11:24") or "AB" if absent.
+   - "out1": 1st Out break time. Convert notations like "2-05", "2.05", "12-07" to afternoon format e.g. "02:05 PM", "12:07 PM", or "" if blank.
    - "in1": 1st In break time. Convert notations like "2-50", "12-40" to "02:50 PM", "12:40 PM", or "" if blank.
-   - "out2": 2nd Out break time (e.g. "01:36 PM", "04:58 PM", "03:00 PM") or "" if blank.
-   - "in2": 2nd In break time (e.g. "02:07 PM", "05:07 PM", "03:34 PM") or "" if blank.
-   - "out3": 3rd Out break time (e.g. "04:58 PM", "05:43 PM") or "" if blank.
-   - "in3": 3rd In break time (e.g. "05:07 PM", "06:18 PM") or "" if blank.
-   - "finalOut": Final Out punch time. IMPORTANT: Evening punch out times MUST have "PM" attached (e.g. "7:30" -> "07:30 PM", "8:12" -> "08:12 PM", "8:31" -> "08:31 PM", "9:30" -> "09:30 PM", "8:28" -> "08:28 PM"). If absent, output "AB". If blank/left without punch, output "NOTPUNCHED".
-   - "remarks": If marked "Half day" or any special remark in handwriting, include it in "remarks" (e.g. "Half day").
-4. Extract the date at the top of the register into "reportDate" (e.g. "03/09/2026 THURSDAY").
+   - "out2": 2nd Out break time (e.g. "01:36 PM", "04:58 PM") or "" if blank.
+   - "in2": 2nd In break time (e.g. "02:07 PM", "05:07 PM") or "" if blank.
+   - "out3": 3rd Out break time or "" if blank.
+   - "in3": 3rd In break time or "" if blank.
+   - "finalOut": Final Out punch time with "PM" attached (e.g. "7:30" -> "07:30 PM", "8:12" -> "08:12 PM"). If absent, output "AB". If blank/left without punch, output "NOTPUNCHED".
+   - "remarks": Any handwritten remark (e.g. "Half day", "Permission") or "".
+5. Extract the date at the top of the register into "reportDate" (e.g. "03/09/2026 THURSDAY").${masterRosterGrounding}
 
 OUTPUT FORMAT:
 Return pure JSON only in this format:
@@ -443,19 +517,32 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
     }],
     generationConfig: {
       temperature: 0.1,
-      maxOutputTokens: 8192,
+      maxOutputTokens: 16384,
       responseMimeType: "application/json"
     }
   };
 
-  const models = [
-    'gemini-flash-lite-latest',
-    'gemini-2.5-flash-lite',
-    'gemini-flash-latest',
-    'gemini-2.5-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-3.5-flash'
-  ];
+  const modelMode = (typeof localStorage !== 'undefined' ? localStorage.getItem('gemini_model_mode') : '') || 'flash';
+
+  let models;
+  if (modelMode === 'pro') {
+    models = [
+      'gemini-2.5-pro',
+      'gemini-1.5-pro',
+      'gemini-2.5-flash',
+      'gemini-flash-latest',
+      'gemini-flash-lite-latest'
+    ];
+  } else {
+    models = [
+      'gemini-2.5-flash',
+      'gemini-flash-latest',
+      'gemini-2.5-flash-lite',
+      'gemini-flash-lite-latest',
+      'gemini-1.5-pro',
+      'gemini-2.5-pro'
+    ];
+  }
   let lastError = null;
 
   for (const model of models) {
@@ -522,10 +609,10 @@ Return pure JSON only, without markdown code blocks, backticks, or any additiona
  * Sends canvas image to backend Gemini Vision API or direct client-side vision fallback.
  */
 export async function processCanvasOCR(canvas, progressCallback) {
-  progressCallback && progressCallback(10, "Optimizing image for fast upload...");
+  progressCallback && progressCallback(10, "Optimizing high-resolution document image...");
 
-  const resized = resizeCanvasIfNeeded(canvas, 1200);
-  const dataUrl = resized.toDataURL('image/jpeg', 0.75);
+  const resized = resizeCanvasIfNeeded(canvas, 1800);
+  const dataUrl = resized.toDataURL('image/jpeg', 0.88);
 
   progressCallback && progressCallback(25, "Scanning handwriting with Gemini AI Vision (5-7s)...");
 
@@ -547,13 +634,22 @@ export async function processCanvasOCR(canvas, progressCallback) {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 90000);
+      const masterDirList = (function() {
+        try { return JSON.parse(localStorage.getItem('attendance_master_directory') || '[]'); } catch(e) { return []; }
+      })();
+      const activeModelMode = (function() {
+        try { return localStorage.getItem('gemini_model_mode') || 'flash'; } catch(e) { return 'flash'; }
+      })();
+
       const response = await fetch('/api/scan-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image: dataUrl,
           mimeType: 'image/jpeg',
-          apiKey: clientKey
+          apiKey: clientKey,
+          masterDirectory: masterDirList,
+          modelMode: activeModelMode
         }),
         signal: controller.signal
       });
@@ -641,21 +737,30 @@ export async function processAllPdfPages(pdfArrayBuffer, rotation, progressCallb
     }).promise;
 
     const rotatedCvs = rotateCanvas(canvas, rotation);
-    const resizedCvs = resizeCanvasIfNeeded(rotatedCvs, 1200);
-    const dataUrl = resizedCvs.toDataURL('image/jpeg', 0.75);
+    const resizedCvs = resizeCanvasIfNeeded(rotatedCvs, 1800);
+    const dataUrl = resizedCvs.toDataURL('image/jpeg', 0.88);
 
     let pageScanned = false;
 
     try {
       const pdfProxyCtrl = new AbortController();
       const pdfProxyTimeout = setTimeout(() => pdfProxyCtrl.abort(), 90000);
+      const masterDirList = (function() {
+        try { return JSON.parse(localStorage.getItem('attendance_master_directory') || '[]'); } catch(e) { return []; }
+      })();
+      const activeModelMode = (function() {
+        try { return localStorage.getItem('gemini_model_mode') || 'flash'; } catch(e) { return 'flash'; }
+      })();
+
       const response = await fetch('/api/scan-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image: dataUrl,
           mimeType: 'image/jpeg',
-          apiKey: clientKey
+          apiKey: clientKey,
+          masterDirectory: masterDirList,
+          modelMode: activeModelMode
         }),
         signal: pdfProxyCtrl.signal
       });
