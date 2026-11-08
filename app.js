@@ -1,6 +1,6 @@
 import { calculateSummaryMetrics, parseTimeToMinutes, calculatePayroll, calculateAttendanceRecord } from './src/attendanceCalculator.js';
 import { generateAttendancePDF } from './src/pdfExporter.js';
-import { renderPdfToCanvas, rotateCanvas, processCanvasOCR, processAllPdfPages, deduplicateAndMergeRecords, loadImageFileToCanvas } from './src/ocrExtractor.js';
+import { renderPdfToCanvas, rotateCanvas, processCanvasOCR, processAllPdfPages, deduplicateAndMergeRecords, loadImageFileToCanvas, fuzzyMatchMasterName } from './src/ocrExtractor.js';
 import { HANDWRITTEN_REGISTER_DATA } from './src/sampleData.js';
 
 // Application State
@@ -146,6 +146,11 @@ function updateSavedReportsDropdown() {
     opt.textContent = `${date} (${db[date].length} Staff)`;
     selectSavedReports.appendChild(opt);
   });
+
+  const curDate = (inputReportDate?.value || reportDate || '').trim();
+  if (curDate && db[curDate]) {
+    selectSavedReports.value = curDate;
+  }
 }
 
 function renderApp() {
@@ -377,8 +382,29 @@ function setupEventListeners() {
 
   // Date updates triggers auto-save & auto-load
   inputReportDate.addEventListener('change', (e) => {
-    reportDate = e.target.value;
-    loadRosterFromCache(reportDate);
+    const newDate = (e.target.value || '').trim();
+    if (!newDate) {
+      inputReportDate.value = reportDate;
+      return;
+    }
+
+    if (staffRecords.length > 0) {
+      const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
+      if (db[newDate] && newDate !== reportDate) {
+        const loadExisting = confirm(`Saved records already exist for "${newDate}".\n\nClick OK to LOAD those saved records, or CANCEL to KEEP current records and save under "${newDate}".`);
+        if (loadExisting) {
+          reportDate = newDate;
+          loadRosterFromCache(newDate);
+          return;
+        }
+      }
+      reportDate = newDate;
+      saveRosterToCache();
+      showToast(`Assigned report date: ${reportDate}`, "info");
+    } else {
+      reportDate = newDate;
+      loadRosterFromCache(reportDate);
+    }
   });
 
   // Saved reports picker
@@ -466,6 +492,8 @@ function setupEventListeners() {
     });
     document.getElementById('btn-close-dir-modal')?.addEventListener('click', () => masterDirModal.style.display = 'none');
     document.getElementById('btn-add-dir-staff')?.addEventListener('click', addMasterStaffName);
+    document.getElementById('btn-sync-dir-roster')?.addEventListener('click', importStaffFromRegister);
+    document.getElementById('btn-clear-dir')?.addEventListener('click', clearMasterDirectory);
   }
 
   // Monthly Matrix & Payroll Modal
@@ -559,6 +587,11 @@ function setupEventListeners() {
   }
 
   document.getElementById('btn-clear-all').addEventListener('click', () => {
+    if (staffRecords.length > 0) {
+      const confirmed = confirm("Are you sure you want to reset and clear all attendance records for this date? This cannot be undone.");
+      if (!confirmed) return;
+    }
+
     // Clear from localStorage for current date
     const dateKey = (inputReportDate.value || reportDate).trim();
     if (dateKey) {
@@ -579,6 +612,9 @@ function setupEventListeners() {
   const btnLoadDemo = document.getElementById('btn-load-demo');
   if (btnLoadDemo) {
     btnLoadDemo.addEventListener('click', () => {
+      if (staffRecords.length > 0 && !confirm("This will replace your current active records with the demo register. Continue?")) {
+        return;
+      }
       staffRecords = JSON.parse(JSON.stringify(HANDWRITTEN_REGISTER_DATA));
       reportDate = "03/09/2026 THURSDAY";
       inputReportDate.value = reportDate;
@@ -640,11 +676,14 @@ function setupEventListeners() {
             showToast("Report image copied to clipboard! Press Ctrl+V in WhatsApp Web to paste.", "success");
           } catch (err) {
             const url = URL.createObjectURL(blob);
+            const safeDate = String(inputReportDate.value || reportDate).replace(/[\/\\:*?"<>|]/g, '-').trim() || 'Report';
             const a = document.createElement('a');
             a.href = url;
-            a.download = `Attendance_Report_${(inputReportDate.value || reportDate).replace(/[\/\\]/g, '-')}.png`;
+            a.download = `Attendance_Report_${safeDate}.png`;
+            document.body.appendChild(a);
             a.click();
-            URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 1500);
             showToast("Report image downloaded!", "success");
           }
         }
@@ -737,8 +776,8 @@ function setupEventListeners() {
     }
   });
 
-  document.getElementById('btn-rotate-left').addEventListener('click', () => { currentRotation = (currentRotation - 90) % 360; updateCanvasPreview(); });
-  document.getElementById('btn-rotate-right').addEventListener('click', () => { currentRotation = (currentRotation + 90) % 360; updateCanvasPreview(); });
+  document.getElementById('btn-rotate-left').addEventListener('click', () => { currentRotation = ((currentRotation - 90) % 360 + 360) % 360; updateCanvasPreview(); });
+  document.getElementById('btn-rotate-right').addEventListener('click', () => { currentRotation = ((currentRotation + 90) % 360 + 360) % 360; updateCanvasPreview(); });
 
   btnPrevPage.addEventListener('click', async () => {
     if (currentPdfBuffer && currentPdfPage > 1) {
@@ -862,6 +901,26 @@ function setupEventListeners() {
   document.getElementById('btn-close-modal').addEventListener('click', closeModal);
   document.getElementById('btn-cancel-modal').addEventListener('click', closeModal);
   editForm.addEventListener('submit', e => { e.preventDefault(); saveModalRecord(); });
+
+  // Global backdrop click to dismiss open modals
+  document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        overlay.style.display = 'none';
+      }
+    });
+  });
+
+  // Global Escape key to dismiss the topmost open modal
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const openModals = Array.from(document.querySelectorAll('.modal-overlay')).filter(m => m.style.display === 'flex' || m.style.display === 'block');
+      if (openModals.length > 0) {
+        const topModal = openModals[openModals.length - 1];
+        topModal.style.display = 'none';
+      }
+    }
+  });
 }
 
 async function handleSingleFileSelected(file) {
@@ -1060,11 +1119,14 @@ function exportAttendanceCSV(processedRecords, metrics, reportDate) {
 
   const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
+  const safeDate = String(reportDate).replace(/[\/\\:*?"<>|]/g, '-').trim() || 'Report';
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Attendance_Report_${reportDate.replace(/[\/\\]/g, '-')}.csv`;
+  a.download = `Attendance_Report_${safeDate}.csv`;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 function showDocumentPreviewModal() { updateCanvasPreview(); docPreviewModal.style.display = 'flex'; }
@@ -1081,7 +1143,7 @@ function updateCanvasPreview() {
     btnPrevPage.style.display = currentPdfPage > 1 ? 'inline-flex' : 'none';
     btnNextPage.style.display = currentPdfPage < totalPdfPages ? 'inline-flex' : 'none';
   } else {
-    pageIndicator.textContent = "Image File";
+    pageIndicator.textContent = currentPdfBuffer ? "Page 1 of 1 (PDF)" : "Photo / Image";
     btnPrevPage.style.display = 'none';
     btnNextPage.style.display = 'none';
   }
@@ -1095,7 +1157,12 @@ function openAddModal() {
     if (el) el.value = '';
   });
   const editTargetSelect = document.getElementById('edit-target-minutes');
-  if (editTargetSelect) editTargetSelect.value = "";
+  if (editTargetSelect) {
+    if (editTargetSelect.options && editTargetSelect.options.length > 0) {
+      editTargetSelect.options[0].textContent = `Use Global Default (${(targetMinutes / 60).toFixed(1)}h)`;
+    }
+    editTargetSelect.value = "";
+  }
   editModal.style.display = 'flex';
 }
 
@@ -1118,6 +1185,9 @@ function openEditModal(index) {
   
   const editTargetSelect = document.getElementById('edit-target-minutes');
   if (editTargetSelect) {
+    if (editTargetSelect.options && editTargetSelect.options.length > 0) {
+      editTargetSelect.options[0].textContent = `Use Global Default (${(targetMinutes / 60).toFixed(1)}h)`;
+    }
     if (r.targetMinutes !== undefined && r.targetMinutes !== null) {
       let opt = editTargetSelect.querySelector(`option[value="${r.targetMinutes}"]`);
       if (!opt) {
@@ -1144,7 +1214,7 @@ function saveModalRecord() {
   
   const record = {
     slNo: index >= 0 ? staffRecords[index].slNo : staffRecords.length + 1,
-    name: document.getElementById('edit-name').value.trim(),
+    name: document.getElementById('edit-name').value.trim().toUpperCase(),
     in: document.getElementById('edit-in').value.trim(),
     out1: document.getElementById('edit-out1').value.trim(),
     in1: document.getElementById('edit-in1').value.trim(),
@@ -1247,7 +1317,7 @@ function checkDiscrepancies(processedRecords) {
 
   const patternAlerts = [];
 
-  // 1. Identify missing punch out today
+  // 1. Identify missing punch out, invalid times, and unclosed breaks today
   processedRecords.forEach((r) => {
     if (r.isNotPunched) {
       patternAlerts.push({
@@ -1255,6 +1325,28 @@ function checkDiscrepancies(processedRecords) {
         severity: 'warning',
         icon: 'fa-solid fa-clock-rotate-left',
         message: `${r.name}: Check-out punch time is missing today (marked NOTPUNCHED).`
+      });
+    }
+
+    if (r.totalWorkingHours === 'INVALID') {
+      patternAlerts.push({
+        category: 'Invalid Punch Time',
+        severity: 'danger',
+        icon: 'fa-solid fa-triangle-exclamation',
+        message: `${r.name}: Punch IN/OUT time format could not be parsed ("${r.in || '-'}" / "${r.finalOut || '-'}").`
+      });
+    }
+
+    const hasUnclosedBreak = 
+      (Boolean(r.out1) !== Boolean(r.in1)) ||
+      (Boolean(r.out2) !== Boolean(r.in2)) ||
+      (Boolean(r.out3) !== Boolean(r.in3));
+    if (hasUnclosedBreak && !r.isAbsent) {
+      patternAlerts.push({
+        category: 'Unclosed Break Punch',
+        severity: 'warning',
+        icon: 'fa-solid fa-pause',
+        message: `${r.name}: Break punch missing in/out time (has step-out time without return-in time, or vice versa).`
       });
     }
   });
@@ -1430,13 +1522,15 @@ function checkDiscrepancies(processedRecords) {
    ========================================================================== */
 function renderMasterDirectory() {
   const container = document.getElementById('dir-staff-list');
+  const countText = document.getElementById('dir-count-text');
   if (!container) return;
 
   const masterDir = safeJsonParse(localStorage.getItem('attendance_master_directory') || '[]', []);
   container.innerHTML = '';
+  if (countText) countText.textContent = `${masterDir.length} Name${masterDir.length === 1 ? '' : 's'} Enrolled`;
 
   if (masterDir.length === 0) {
-    container.innerHTML = `<span style="font-size: 0.8125rem; color: var(--text-muted);">No master staff names defined yet. Add official names above!</span>`;
+    container.innerHTML = `<span style="font-size: 0.8125rem; color: var(--text-muted);">No master staff names defined yet. Add official names above or import from current register!</span>`;
     return;
   }
 
@@ -1472,12 +1566,51 @@ function addMasterStaffName() {
   const masterDir = safeJsonParse(localStorage.getItem('attendance_master_directory') || '[]', []);
   if (!masterDir.includes(name)) {
     masterDir.push(name);
+    masterDir.sort((a, b) => a.localeCompare(b));
     localStorage.setItem('attendance_master_directory', JSON.stringify(masterDir));
     input.value = '';
     renderMasterDirectory();
     showToast(`Added ${name} to Master Directory`, "success");
   } else {
     showToast(`${name} is already in the Master Directory`, "info");
+  }
+}
+
+function importStaffFromRegister() {
+  if (staffRecords.length === 0) {
+    showToast("No active register loaded to import names from.", "info");
+    return;
+  }
+
+  const masterDir = safeJsonParse(localStorage.getItem('attendance_master_directory') || '[]', []);
+  let added = 0;
+
+  staffRecords.forEach(r => {
+    const name = (r.name || '').trim().toUpperCase();
+    if (name && name.length >= 2 && !masterDir.includes(name)) {
+      masterDir.push(name);
+      added++;
+    }
+  });
+
+  if (added > 0) {
+    masterDir.sort((a, b) => a.localeCompare(b));
+    localStorage.setItem('attendance_master_directory', JSON.stringify(masterDir));
+    renderMasterDirectory();
+    showToast(`Imported ${added} staff names into Master Directory!`, "success");
+  } else {
+    showToast("All active staff names are already in the Master Directory.", "info");
+  }
+}
+
+function clearMasterDirectory() {
+  const masterDir = safeJsonParse(localStorage.getItem('attendance_master_directory') || '[]', []);
+  if (masterDir.length === 0) return;
+
+  if (confirm(`Are you sure you want to remove all ${masterDir.length} names from the Master Directory?`)) {
+    localStorage.removeItem('attendance_master_directory');
+    renderMasterDirectory();
+    showToast("Master Directory cleared.", "info");
   }
 }
 
@@ -1510,8 +1643,9 @@ function renderMonthlyMatrix() {
   savedDates.forEach(dateKey => {
     const dailyRecords = db[dateKey] || [];
     dailyRecords.forEach(r => {
-      const name = (r.name || '').trim().toUpperCase();
+      let name = (r.name || '').trim().toUpperCase();
       if (!name) return;
+      name = fuzzyMatchMasterName(name);
 
       if (!staffStatsMap[name]) {
         staffStatsMap[name] = {
@@ -1543,6 +1677,7 @@ function renderMonthlyMatrix() {
 
   const rawList = Object.values(staffStatsMap);
   const payrollList = calculatePayroll(rawList, { dailyRate, lateDeductionRule: lateRule });
+  payrollList.sort((a, b) => a.name.localeCompare(b.name));
 
   tableBody.innerHTML = '';
   payrollList.forEach(s => {
@@ -1575,8 +1710,9 @@ function exportMonthlyMatrixCSV() {
   savedDates.forEach(dateKey => {
     const dailyRecords = db[dateKey] || [];
     dailyRecords.forEach(r => {
-      const name = (r.name || '').trim().toUpperCase();
+      let name = (r.name || '').trim().toUpperCase();
       if (!name) return;
+      name = fuzzyMatchMasterName(name);
 
       if (!staffStatsMap[name]) {
         staffStatsMap[name] = { name, presentDays: 0, lateDays: 0, shortfallDays: 0, absentDays: 0 };
@@ -1598,7 +1734,9 @@ function exportMonthlyMatrixCSV() {
   const lateRuleVal = parseInt(document.getElementById('select-late-rule')?.value, 10);
   const lateRule = !isNaN(lateRuleVal) ? lateRuleVal : 3;
 
-  const payrollList = calculatePayroll(Object.values(staffStatsMap), { dailyRate, lateDeductionRule: lateRule });
+  const rawList = Object.values(staffStatsMap);
+  const payrollList = calculatePayroll(rawList, { dailyRate, lateDeductionRule: lateRule });
+  payrollList.sort((a, b) => a.name.localeCompare(b.name));
 
   let csv = `MONTHLY ATTENDANCE & PAYROLL SUMMARY MATRIX\n`;
   csv += `Daily Wage Rate: ₹${dailyRate}, Late Deduction Rule: Every ${lateRule} Lates = 0.5 Days Penalty\n\n`;
@@ -1613,8 +1751,10 @@ function exportMonthlyMatrixCSV() {
   const a = document.createElement('a');
   a.href = url;
   a.download = `Monthly_Payroll_Matrix_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
   showToast("Monthly Payroll Excel exported successfully!", "success");
 }
 
@@ -1640,8 +1780,10 @@ function exportBackupJSON() {
   const a = document.createElement('a');
   a.href = url;
   a.download = `Attendance_Backup_${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
   showToast("Full backup downloaded successfully!", "success");
 }
 
@@ -1657,14 +1799,20 @@ function importBackupJSON(file) {
           localStorage.setItem('attendance_master_directory', JSON.stringify(data.masterDirectory));
         }
         updateSavedReportsDropdown();
-        renderApp();
+        loadRosterFromCache(inputReportDate.value || reportDate);
         showToast("Full backup restored successfully!", "success");
       } else {
         showToast("Invalid backup file structure.", "info");
       }
     } catch (err) {
       showToast(`Backup Restore Error: ${err.message}`, "info");
+    } finally {
+      if (backupFileInput) backupFileInput.value = '';
     }
+  };
+  reader.onerror = () => {
+    showToast("Failed to read backup file.", "info");
+    if (backupFileInput) backupFileInput.value = '';
   };
   reader.readAsText(file);
 }

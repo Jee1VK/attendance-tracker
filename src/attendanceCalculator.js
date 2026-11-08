@@ -159,13 +159,13 @@ export function calculateAttendanceRecord(record, targetMinutes = DEFAULT_TARGET
     ...record,
     targetMinutes: recordTargetMinutes,
     totalWorkingHours: formatMinutesToTime(netWorkMinutes),
-    shortfall: formatMinutesToTime(shortfallMinutes),
+    shortfall: formatMinutesToTime(isShortfall ? shortfallMinutes : 0),
     isShortfall,
     isAbsent: false,
     isNotPunched: false,
     isLateIn,
     netWorkMinutes,
-    shortfallMinutes,
+    shortfallMinutes: isShortfall ? shortfallMinutes : 0,
     breakMinutes: totalBreakMinutes
   };
 }

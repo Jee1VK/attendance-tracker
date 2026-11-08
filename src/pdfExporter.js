@@ -32,7 +32,8 @@ export function generateAttendancePDF(processedRecords, metrics, reportDate = ne
 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Date: ${reportDate}  |  Target Shift: ${shiftLabel}  |  Lunch: 1.0 Hour`, pageWidth - 30, 32, { align: 'right' });
+  const shiftSub = `Date: ${reportDate}  |  Target Shift: ${shiftLabel}${metrics.graceMinutes ? `  |  Grace: ${metrics.graceMinutes}m` : ''}`;
+  doc.text(shiftSub, pageWidth - 30, 32, { align: 'right' });
 
   // Summary Metrics Bar
   doc.setFillColor(241, 245, 249); // Slate-100
@@ -135,7 +136,8 @@ export function generateAttendancePDF(processedRecords, metrics, reportDate = ne
   });
 
   // Save the generated PDF
-  const filename = `Attendance_Report_${reportDate.replace(/[\/\\]/g, '-')}.pdf`;
+  const safeDateStr = String(reportDate).replace(/[\/\\:*?"<>|]/g, '-').trim() || 'Report';
+  const filename = `Attendance_Report_${safeDateStr}.pdf`;
   
   try {
     const blob = doc.output('blob');

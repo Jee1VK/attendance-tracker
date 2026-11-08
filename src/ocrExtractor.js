@@ -13,35 +13,69 @@ export function getGeminiApiKey(autoShowModal = true) {
   return key.trim().replace(/^["']|["']$/g, '');
 }
 
-export function fuzzyMatchMasterName(rawName) {
-  let masterDir = [];
-  try {
-    masterDir = JSON.parse(localStorage.getItem('attendance_master_directory') || '[]');
-  } catch (e) {
-    masterDir = [];
+function computeLevenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const d = [];
+  for (let i = 0; i <= m; i++) d[i] = [i];
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+    }
+  }
+  return d[m][n];
+}
+
+export function fuzzyMatchMasterName(rawName, customDirectory = null) {
+  let masterDir = customDirectory;
+  if (!masterDir) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        masterDir = JSON.parse(localStorage.getItem('attendance_master_directory') || '[]');
+      }
+    } catch (e) {
+      masterDir = [];
+    }
   }
   if (!Array.isArray(masterDir) || masterDir.length === 0) return rawName;
 
   const target = rawName.trim().toUpperCase();
-  let bestMatch = target;
+  const normTarget = target.replace(/[\s\.\-\_\(\)]/g, '');
+  if (!normTarget) return rawName;
+
+  let bestMatch = rawName;
   let highestScore = 0;
 
-  masterDir.forEach(officialName => {
+  for (const officialName of masterDir) {
     const official = officialName.trim().toUpperCase();
-    if (official === target) {
-      bestMatch = official;
-      highestScore = 1.0;
-      return;
+    const normOfficial = official.replace(/[\s\.\-\_\(\)]/g, '');
+
+    // 1. Exact match or normalized space/dot match (e.g. "DEVARAJ N T" vs "DEVARAJ NT")
+    if (target === official || normTarget === normOfficial) {
+      return officialName;
     }
 
-    if (official.includes(target) || target.includes(official)) {
-      const score = Math.min(official.length, target.length) / Math.max(official.length, target.length);
+    // 2. Substring containment match on normalized strings
+    if (normOfficial.includes(normTarget) || normTarget.includes(normOfficial)) {
+      const score = Math.min(normOfficial.length, normTarget.length) / Math.max(normOfficial.length, normTarget.length);
       if (score > highestScore && score >= 0.7) {
         highestScore = score;
-        bestMatch = official;
+        bestMatch = officialName;
       }
     }
-  });
+
+    // 3. Levenshtein edit-distance similarity for minor OCR spelling variations (e.g. "ANANDAMA" vs "ANANDAMMA")
+    const maxLen = Math.max(normTarget.length, normOfficial.length);
+    if (maxLen >= 4) {
+      const dist = computeLevenshtein(normTarget, normOfficial);
+      const sim = (maxLen - dist) / maxLen;
+      if (sim > highestScore && sim >= 0.75) {
+        highestScore = sim;
+        bestMatch = officialName;
+      }
+    }
+  }
 
   return bestMatch;
 }
@@ -579,6 +613,14 @@ export async function processAllPdfPages(pdfArrayBuffer, rotation, progressCallb
   const clientKey = getGeminiApiKey(false);
 
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+    if (pageNum > 1) {
+      progressCallback && progressCallback(
+        Math.round((pageNum - 1) / totalPages * 80) + 10,
+        `[Page ${pageNum}/${totalPages}] Pacing request (2s)...`
+      );
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
     progressCallback && progressCallback(
       Math.round((pageNum - 1) / totalPages * 80) + 10,
       `Scanning page ${pageNum} of ${totalPages} with Gemini AI Vision...`
