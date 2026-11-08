@@ -4,9 +4,9 @@
  */
 
 
-export function getGeminiApiKey() {
+export function getGeminiApiKey(autoShowModal = true) {
   let key = localStorage.getItem('gemini_api_key') || '';
-  if (!key && typeof document !== 'undefined') {
+  if (!key && autoShowModal && typeof document !== 'undefined') {
     const modal = document.getElementById('api-key-modal');
     if (modal) modal.style.display = 'flex';
   }
@@ -78,6 +78,7 @@ export function deduplicateAndMergeRecords(records) {
         out3: existing.out3 || r.out3,
         in3: existing.in3 || r.in3,
         finalOut: (existing.finalOut && existing.finalOut !== 'AB' && existing.finalOut !== 'NOTPUNCHED' && existing.finalOut !== '-') ? existing.finalOut : r.finalOut,
+        targetMinutes: existing.targetMinutes !== undefined && existing.targetMinutes !== null ? existing.targetMinutes : (r.targetMinutes !== undefined ? r.targetMinutes : null),
         remarks: existing.remarks || r.remarks || ''
       });
     }
@@ -495,7 +496,7 @@ export async function processCanvasOCR(canvas, progressCallback) {
   progressCallback && progressCallback(25, "Scanning handwriting with Gemini AI Vision (5-7s)...");
 
   let scanError = null;
-  const clientKey = getGeminiApiKey();
+  const clientKey = getGeminiApiKey(false);
 
   // 1. Try backend proxy server if available (e.g. running on local server, LAN IP, or port 8000)
   const isLikelyBackendHost = typeof window !== 'undefined' && (
@@ -575,7 +576,7 @@ export async function processAllPdfPages(pdfArrayBuffer, rotation, progressCallb
 
   let rawRecords = [];
   let detectedDate = '';
-  const clientKey = getGeminiApiKey();
+  const clientKey = getGeminiApiKey(false);
 
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
     progressCallback && progressCallback(

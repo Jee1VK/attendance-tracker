@@ -568,7 +568,7 @@ body {
 .name-cell {
   text-align: left !important;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-heading);
 }
 
 /* Table Actions */

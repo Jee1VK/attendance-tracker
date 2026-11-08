@@ -92,7 +92,7 @@
         <div class="brand-title">
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <h1 style="margin: 0;">Staff Attendance Tracking App</h1>
-            <span class="header-version-tag" id="header-version-tag" title="Click to check for latest updates" style="cursor: pointer;"><i class="fa-solid fa-rotate" style="font-size: 0.65rem;"></i> v1.2.7</span>
+            <span class="header-version-tag" id="header-version-tag" title="Click to check for latest updates" style="cursor: pointer;"><i class="fa-solid fa-rotate" style="font-size: 0.65rem;"></i> v1.2.8</span>
           </div>
           <p>Instant AI Conversion • Direct Camera Capture • Excel & PDF Export • WhatsApp Share</p>
         </div>
@@ -238,7 +238,7 @@
           If your handwritten page is sideways, click <b>Rotate 90°</b> so it is upright before converting to report!
         </p>
 
-        <div style="background: #0f172a; padding: 12px; border-radius: 8px; text-align: center; max-height: 440px; overflow: auto; margin-bottom: 16px;">
+        <div style="background: var(--bg-main); padding: 12px; border-radius: 8px; text-align: center; max-height: 440px; overflow: auto; margin-bottom: 16px;">
           <canvas id="preview-canvas" style="max-width: 100%; height: auto; border: 1px solid var(--border-color); border-radius: 4px;"></canvas>
         </div>
 
@@ -259,12 +259,12 @@
     </div>
 
     <!-- Discrepancy & Alert Center -->
-    <div id="discrepancy-panel" style="display: none; background: #1e293b; border: 1px solid #d97706; border-radius: var(--radius-md); padding: 18px 24px; margin-bottom: 24px; box-shadow: var(--shadow-md);">
+    <div id="discrepancy-panel" style="display: none; background: var(--bg-card); border: 1px solid #d97706; border-radius: var(--radius-md); padding: 18px 24px; margin-bottom: 24px; box-shadow: var(--shadow-md);">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-        <h2 style="font-family: var(--font-heading); font-size: 1.125rem; font-weight: 700; color: #fbbf24; display: flex; align-items: center; gap: 8px;">
+        <h2 style="font-family: var(--font-heading); font-size: 1.125rem; font-weight: 700; color: var(--amber-text); display: flex; align-items: center; gap: 8px;">
           <i class="fa-solid fa-triangle-exclamation"></i> Discrepancy & Alert Center
         </h2>
-        <span style="font-size: 0.75rem; font-weight: 700; background: #78350f; color: #fef3c7; padding: 3px 8px; border-radius: 12px;" id="discrepancy-badge">0 Alerts</span>
+        <span style="font-size: 0.75rem; font-weight: 700; background: var(--amber-bg); color: var(--amber-text); border: 1px solid #d97706; padding: 3px 8px; border-radius: 12px;" id="discrepancy-badge">0 Alerts</span>
       </div>
       <div id="discrepancy-list" style="display: flex; flex-direction: column; gap: 10px;">
         <!-- Dynamic Alert Rows -->
@@ -383,7 +383,7 @@
         <span>Staff Attendance Tracking App</span>
       </div>
       <div class="footer-right">
-        <span class="app-version-badge" id="app-version-badge"><i class="fa-solid fa-code-branch"></i> v1.2.7</span>
+        <span class="app-version-badge" id="app-version-badge"><i class="fa-solid fa-code-branch"></i> v1.2.8</span>
       </div>
     </footer>
   </div>
@@ -490,7 +490,7 @@
         <button id="btn-add-dir-staff" class="btn btn-primary" style="padding: 8px 14px;"><i class="fa-solid fa-plus"></i> Add Name</button>
       </div>
 
-      <div id="dir-staff-list" style="max-height: 260px; overflow-y: auto; background: #0f172a; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
+      <div id="dir-staff-list" style="max-height: 260px; overflow-y: auto; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
         <!-- Dynamic Staff Chips -->
       </div>
     </div>
@@ -504,15 +504,15 @@
         <button id="btn-close-matrix-modal" class="action-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
-      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; background: #0f172a; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; background: var(--bg-main); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
         <div style="display: flex; align-items: center; gap: 10px;">
           <label for="input-daily-rate" style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);">Daily Wage Rate (₹):</label>
-          <input type="number" id="input-daily-rate" value="500" style="width: 90px; padding: 5px 8px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem;">
+          <input type="number" id="input-daily-rate" value="500" style="width: 90px; padding: 5px 8px; border-radius: 6px; background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem;">
         </div>
 
         <div style="display: flex; align-items: center; gap: 10px;">
           <label for="select-late-rule" style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);">Lateness Penalty Rule:</label>
-          <select id="select-late-rule" style="padding: 5px 8px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem;">
+          <select id="select-late-rule" style="padding: 5px 8px; border-radius: 6px; background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.8125rem;">
             <option value="3">Every 3 Lates = ½ Day Pay Deduction</option>
             <option value="2">Every 2 Lates = ½ Day Pay Deduction</option>
             <option value="0">No Lateness Penalty</option>
@@ -524,11 +524,11 @@
         </button>
       </div>
 
-      <div style="overflow-x: auto; max-height: 440px; background: #0f172a; border-radius: 8px; border: 1px solid var(--border-color);">
+      <div style="overflow-x: auto; max-height: 440px; background: var(--bg-main); border-radius: 8px; border: 1px solid var(--border-color);">
         <table style="width: 100%; border-collapse: collapse; font-size: 0.8125rem;" id="matrix-table">
           <thead>
-            <tr style="background: #1e293b; color: var(--text-main); border-bottom: 2px solid var(--border-color); text-align: center;">
-              <th style="padding: 10px; text-align: left; position: sticky; left: 0; background: #1e293b; z-index: 2;">Staff Name</th>
+            <tr style="background: var(--bg-card); color: var(--text-main); border-bottom: 2px solid var(--border-color); text-align: center;">
+              <th style="padding: 10px; text-align: left; position: sticky; left: 0; background: var(--bg-card); z-index: 2;">Staff Name</th>
               <th style="padding: 10px;">Present</th>
               <th style="padding: 10px;">Late</th>
               <th style="padding: 10px;">Shortfall</th>
@@ -611,7 +611,7 @@
         Captured <b id="gallery-count-text">0 pages</b>. Snap additional pages of your handwritten register or process them all with Gemini AI Vision!
       </p>
 
-      <div id="gallery-thumbnails-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; max-height: 320px; overflow-y: auto; background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 20px;">
+      <div id="gallery-thumbnails-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; max-height: 320px; overflow-y: auto; background: var(--bg-main); padding: 14px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 20px;">
         <!-- Thumbnails inserted dynamically -->
       </div>
 

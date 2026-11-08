@@ -9,18 +9,18 @@ export const DEFAULT_EXPECTED_IN_MINUTES = 10 * 60; // Default 10:00 AM = 600 mi
 export function parseTimeToMinutes(timeStr) {
   if (!timeStr || typeof timeStr !== 'string') return null;
   const cleaned = timeStr.trim().toUpperCase();
-  if (cleaned === 'AB' || cleaned === 'NOTPUNCHED' || cleaned === '') return null;
+  if (cleaned === 'AB' || cleaned === 'ABSENT' || cleaned === 'NOTPUNCHED' || cleaned === '-' || cleaned === '') return null;
 
   const isPM = cleaned.includes('PM');
   const isAM = cleaned.includes('AM');
-  const timeOnly = cleaned.replace(/AM|PM/g, '').trim();
-  const parts = timeOnly.split(/[:\.]/).map(p => parseInt(p, 10));
+  const timeOnly = cleaned.replace(/AM|PM/gi, '').trim();
+  const parts = timeOnly.split(/[:\.\-\=]/).map(p => parseInt(p.trim(), 10));
 
   if (parts.length === 0 || isNaN(parts[0])) return null;
 
   let hours = parts[0];
-  let minutes = parts.length > 1 ? parts[1] : 0;
-  let seconds = parts.length > 2 ? parts[2] : 0;
+  let minutes = parts.length > 1 && !isNaN(parts[1]) ? parts[1] : 0;
+  let seconds = parts.length > 2 && !isNaN(parts[2]) ? parts[2] : 0;
 
   if (isPM && hours < 12) hours += 12;
   if (isAM && hours === 12) hours = 0;
@@ -174,7 +174,10 @@ export function calculateAttendanceRecord(record, targetMinutes = DEFAULT_TARGET
  * Calculates overall summary metrics
  */
 export function calculateSummaryMetrics(records, targetMinutes = DEFAULT_TARGET_MINUTES, graceMinutes = 0, expectedInMinutes = DEFAULT_EXPECTED_IN_MINUTES) {
-  const processed = records.map(r => calculateAttendanceRecord(r, targetMinutes, graceMinutes, expectedInMinutes));
+  const processed = records.map((r, idx) => ({
+    ...calculateAttendanceRecord(r, targetMinutes, graceMinutes, expectedInMinutes),
+    _originalIndex: idx
+  }));
 
   const totalStaff = processed.length;
   const absentCount = processed.filter(r => r.isAbsent).length;
@@ -218,8 +221,8 @@ export function calculateSummaryMetrics(records, targetMinutes = DEFAULT_TARGET_
  * Calculates monthly payroll, late penalties, and net estimated salary
  */
 export function calculatePayroll(monthlyStats, options = {}) {
-  const dailyRate = options.dailyRate || 500;
-  const lateDeductionRule = options.lateDeductionRule || 3; // 3 Lates = 0.5 Day deduction
+  const dailyRate = options.dailyRate !== undefined && !isNaN(options.dailyRate) ? options.dailyRate : 500;
+  const lateDeductionRule = options.lateDeductionRule !== undefined && !isNaN(options.lateDeductionRule) ? options.lateDeductionRule : 3; // 3 Lates = 0.5 Day deduction
 
   return monthlyStats.map(staff => {
     const present = staff.presentDays || 0;

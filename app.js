@@ -201,7 +201,9 @@ function renderTable(records) {
     if (r.isShortfall && !r.isAbsent) tr.classList.add('row-shortfall');
 
     // Find the true master index in staffRecords array
-    let realIndex = staffRecords.findIndex(item => item === r || (item.name && item.name === r.name));
+    let realIndex = r._originalIndex !== undefined
+      ? r._originalIndex
+      : staffRecords.findIndex(item => item === r || (item.slNo === r.slNo && item.name === r.name) || (item.name && item.name === r.name));
     if (realIndex === -1) {
       realIndex = (r.slNo || 1) - 1;
     }
@@ -375,7 +377,6 @@ function setupEventListeners() {
 
   // Date updates triggers auto-save & auto-load
   inputReportDate.addEventListener('change', (e) => {
-    saveRosterToCache();
     reportDate = e.target.value;
     loadRosterFromCache(reportDate);
   });
@@ -386,7 +387,6 @@ function setupEventListeners() {
     selectSavedReports.addEventListener('change', (e) => {
       const selected = e.target.value;
       if (selected) {
-        saveRosterToCache();
         reportDate = selected;
         inputReportDate.value = selected;
         loadRosterFromCache(selected);
@@ -480,6 +480,17 @@ function setupEventListeners() {
     document.getElementById('btn-export-matrix-csv')?.addEventListener('click', exportMonthlyMatrixCSV);
     document.getElementById('input-daily-rate')?.addEventListener('input', renderMonthlyMatrix);
     document.getElementById('select-late-rule')?.addEventListener('change', renderMonthlyMatrix);
+  }
+
+  // Allow Enter key in Master Staff Directory input
+  const inputNewStaffName = document.getElementById('input-new-staff-name');
+  if (inputNewStaffName) {
+    inputNewStaffName.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addMasterStaffName();
+      }
+    });
   }
 
   // Cloud & File Backup / Restore
@@ -613,10 +624,11 @@ function setupEventListeners() {
     showToast("Capturing high-resolution report image...", "info");
     const targetEl = document.getElementById('report-table-card');
 
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
     try {
       const cvs = await window.html2canvas(targetEl, {
         scale: 2,
-        backgroundColor: '#1e293b'
+        backgroundColor: isLight ? '#ffffff' : '#1e293b'
       });
 
       cvs.toBlob(async (blob) => {
@@ -1275,25 +1287,24 @@ function checkDiscrepancies(processedRecords) {
         const h = staffHistory[name];
         h.totalDays++;
 
-        const isAb = (r.in === 'AB' || r.finalOut === 'AB' || r.isAbsent);
-        if (isAb) {
+        const computed = calculateAttendanceRecord(r, targetMinutes, graceMinutes, expectedInMinutes);
+        if (computed.isAbsent) {
           h.absentDays++;
         } else {
           h.presentDays++;
 
           // Check late IN pattern
-          const startMins = parseTimeToMinutes(r.in);
-          if (startMins !== null && startMins > expectedInMinutes) {
+          if (computed.isLateIn) {
             h.lateDays++;
           }
 
           // Check missing out pattern
-          if (r.finalOut === 'NOTPUNCHED' || r.isNotPunched) {
+          if (computed.isNotPunched) {
             h.missingOutDays++;
           }
 
           // Check shortfall pattern
-          if (r.isShortfall) {
+          if (computed.isShortfall) {
             h.shortfallDays++;
           }
         }
@@ -1525,8 +1536,10 @@ function renderMonthlyMatrix() {
     });
   });
 
-  const dailyRate = parseFloat(document.getElementById('input-daily-rate')?.value || 500);
-  const lateRule = parseInt(document.getElementById('select-late-rule')?.value || 3, 10);
+  const dailyRateVal = parseFloat(document.getElementById('input-daily-rate')?.value);
+  const dailyRate = !isNaN(dailyRateVal) ? dailyRateVal : 500;
+  const lateRuleVal = parseInt(document.getElementById('select-late-rule')?.value, 10);
+  const lateRule = !isNaN(lateRuleVal) ? lateRuleVal : 3;
 
   const rawList = Object.values(staffStatsMap);
   const payrollList = calculatePayroll(rawList, { dailyRate, lateDeductionRule: lateRule });
@@ -1537,14 +1550,14 @@ function renderMonthlyMatrix() {
     tr.style.cssText = 'border-bottom: 1px solid var(--border-color); text-align: center; color: var(--text-main);';
 
     tr.innerHTML = `
-      <td style="padding: 10px; text-align: left; font-weight: 600; position: sticky; left: 0; background: #0f172a; border-right: 1px solid var(--border-color);">${esc(s.name)}</td>
-      <td style="padding: 10px; color: #34d399; font-weight: 600;">${s.presentDays}</td>
-      <td style="padding: 10px; color: ${s.lateDays > 0 ? '#fcd34d' : 'inherit'};">${s.lateDays}</td>
-      <td style="padding: 10px; color: ${s.shortfallDays > 0 ? '#fca5a5' : 'inherit'};">${s.shortfallDays}</td>
+      <td style="padding: 10px; text-align: left; font-weight: 600; position: sticky; left: 0; background: var(--bg-main); border-right: 1px solid var(--border-color);">${esc(s.name)}</td>
+      <td style="padding: 10px; color: var(--success-text); font-weight: 600;">${s.presentDays}</td>
+      <td style="padding: 10px; color: ${s.lateDays > 0 ? 'var(--amber-text)' : 'inherit'};">${s.lateDays}</td>
+      <td style="padding: 10px; color: ${s.shortfallDays > 0 ? 'var(--red-text)' : 'inherit'};">${s.shortfallDays}</td>
       <td style="padding: 10px; color: ${s.absentDays > 0 ? '#ef4444' : 'inherit'};">${s.absentDays}</td>
-      <td style="padding: 10px; color: #fca5a5;">${s.latePenaltyDays > 0 ? '-' + s.latePenaltyDays + ' Days' : '0'}</td>
-      <td style="padding: 10px; font-weight: 700; color: #67e8f9;">${s.netPayableDays} Days</td>
-      <td style="padding: 10px; font-weight: 700; color: #34d399;">₹${s.estimatedSalary.toLocaleString()}</td>
+      <td style="padding: 10px; color: var(--red-text);">${s.latePenaltyDays > 0 ? '-' + s.latePenaltyDays + ' Days' : '0'}</td>
+      <td style="padding: 10px; font-weight: 700; color: var(--accent-primary);">${s.netPayableDays} Days</td>
+      <td style="padding: 10px; font-weight: 700; color: var(--success-text);">₹${s.estimatedSalary.toLocaleString()}</td>
     `;
     tableBody.appendChild(tr);
   });
@@ -1580,8 +1593,10 @@ function exportMonthlyMatrixCSV() {
     });
   });
 
-  const dailyRate = parseFloat(document.getElementById('input-daily-rate')?.value || 500);
-  const lateRule = parseInt(document.getElementById('select-late-rule')?.value || 3, 10);
+  const dailyRateVal = parseFloat(document.getElementById('input-daily-rate')?.value);
+  const dailyRate = !isNaN(dailyRateVal) ? dailyRateVal : 500;
+  const lateRuleVal = parseInt(document.getElementById('select-late-rule')?.value, 10);
+  const lateRule = !isNaN(lateRuleVal) ? lateRuleVal : 3;
 
   const payrollList = calculatePayroll(Object.values(staffStatsMap), { dailyRate, lateDeductionRule: lateRule });
 

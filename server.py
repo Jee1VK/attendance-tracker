@@ -264,7 +264,8 @@ Return raw JSON only, no backticks, no markdown.
                         'in2': str(r.get('in2') or r.get('in_2') or r.get('break2_in') or '').strip(),
                         'out3': str(r.get('out3') or r.get('out_3') or '').strip(),
                         'in3': str(r.get('in3') or r.get('in_3') or '').strip(),
-                        'finalOut': final_out
+                        'finalOut': final_out,
+                        'remarks': str(r.get('remarks') or r.get('Remarks') or r.get('reason') or '').strip()
                     })
 
             if cleaned:
