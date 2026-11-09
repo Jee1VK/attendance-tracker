@@ -1,0 +1,27 @@
+{
+  "name": "staff-attendance-tracker",
+  "version": "1.3.0",
+  "private": true,
+  "description": "Staff Attendance Tracking PWA with AI Handwriting Vision and Anti-Tamper Protection",
+  "main": "app.js",
+  "scripts": {
+    "build": "powershell -ExecutionPolicy Bypass -Command \"& { Set-Location '\\\\KUBERAN-NAS\\Kuberan\\Jeevan\\Gemini Projects\\attendance-tracker-app'; node scripts/build-protected.js }\"",
+    "obfuscate": "powershell -ExecutionPolicy Bypass -Command \"& { Set-Location '\\\\KUBERAN-NAS\\Kuberan\\Jeevan\\Gemini Projects\\attendance-tracker-app'; node scripts/build-protected.js }\"",
+    "prod:switch": "powershell -ExecutionPolicy Bypass -Command \"& { Set-Location '\\\\KUBERAN-NAS\\Kuberan\\Jeevan\\Gemini Projects\\attendance-tracker-app'; node scripts/switch-mode.js prod }\"",
+    "dev:switch": "powershell -ExecutionPolicy Bypass -Command \"& { Set-Location '\\\\KUBERAN-NAS\\Kuberan\\Jeevan\\Gemini Projects\\attendance-tracker-app'; node scripts/switch-mode.js dev }\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jee1VK/attendance-tracker.git"
+  },
+  "keywords": [
+    "attendance",
+    "ocr",
+    "gemini-vision",
+    "pwa",
+    "payroll",
+    "obfuscation"
+  ],
+  "author": "Kuberan Silks",
+  "license": "UNLICENSED"
+}

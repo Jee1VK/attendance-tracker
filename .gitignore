@@ -9,3 +9,8 @@ qr_code.png
 scratch/
 __pycache__/
 *.log
+
+# Node & Build artifacts
+node_modules/
+temp-bundle.js
+*.tmp

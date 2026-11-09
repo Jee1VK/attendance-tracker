@@ -6,12 +6,9 @@ const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './src/styles.css',
-  './app.js',
-  './src/attendanceCalculator.js',
-  './src/pdfExporter.js',
-  './src/ocrExtractor.js',
-  './src/sampleData.js',
-  './manifest.json'
+  './app.bundle.js',
+  './manifest.json',
+  './icon-512.png'
 ];
 
 self.addEventListener('install', (evt) => {
