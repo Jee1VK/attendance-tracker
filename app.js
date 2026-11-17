@@ -1,4 +1,15 @@
-import { calculateSummaryMetrics, parseTimeToMinutes, calculatePayroll, calculateAttendanceRecord } from './src/attendanceCalculator.js';
+import {
+  calculateSummaryMetrics,
+  parseTimeToMinutes,
+  calculatePayroll,
+  calculateAttendanceRecord,
+  getISTDateISO,
+  getISTDisplayDate,
+  getISTTimestamp,
+  normalizeWorkDateIST,
+  normalizeEmployeeId,
+  aggregateMonthlyAttendance
+} from './src/attendanceCalculator.js';
 import { generateAttendancePDF } from './src/pdfExporter.js';
 import { renderPdfToCanvas, rotateCanvas, processCanvasOCR, processAllPdfPages, deduplicateAndMergeRecords, loadImageFileToCanvas, fuzzyMatchMasterName, enhanceDocumentContrast } from './src/ocrExtractor.js';
 import { HANDWRITTEN_REGISTER_DATA } from './src/sampleData.js';
@@ -12,7 +23,7 @@ let searchQuery = '';
 let targetMinutes = 570; // 9.5 hours standard
 let graceMinutes = 0;
 let expectedInMinutes = 600; // 10:00 AM default
-let reportDate = new Date().toLocaleDateString('en-GB');
+let reportDate = getISTDisplayDate();
 
 // Document Preview State (Single File)
 let currentPdfBuffer = null;
@@ -96,14 +107,43 @@ function safeJsonParse(raw, fallback = {}) {
   catch (e) { console.warn('Corrupted localStorage data, resetting:', e); return fallback; }
 }
 
+/**
+ * Prevents duplicate submissions on slow connections by immediately disabling the trigger button
+ * and showing a loading spinner until the operation finishes.
+ */
+async function withButtonLoading(btn, loadingLabel, asyncFn) {
+  if (!btn) return await asyncFn();
+  if (btn.disabled || btn.dataset.loading === 'true') return;
+  const origHtml = btn.innerHTML;
+  const origDisabled = btn.disabled;
+  btn.dataset.loading = 'true';
+  btn.disabled = true;
+  btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${esc(loadingLabel)}`;
+  try {
+    return await asyncFn();
+  } finally {
+    btn.dataset.loading = '';
+    btn.disabled = origDisabled;
+    btn.innerHTML = origHtml;
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   inputReportDate.value = reportDate;
   updateSavedReportsDropdown();
   
-  // Load today's records from localStorage cache if present
+  // Load today's IST records from localStorage cache if present
   const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
   if (db[reportDate]) {
     staffRecords = db[reportDate];
+  } else {
+    const todayIST = getISTDateISO();
+    const matchedKey = Object.keys(db).find(k => normalizeWorkDateIST(k) === todayIST);
+    if (matchedKey) {
+      reportDate = matchedKey;
+      inputReportDate.value = matchedKey;
+      staffRecords = db[matchedKey];
+    }
   }
   
   renderApp();
@@ -117,6 +157,22 @@ function saveRosterToCache() {
   const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
   db[dateKey] = staffRecords;
   localStorage.setItem('attendance_tracker_rosters', JSON.stringify(db));
+
+  // Best-effort sync to SQLite backend when hosted via local server
+  if (typeof window !== 'undefined' && window.location.port === '8000') {
+    fetch('/api/attendance/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reportDate: dateKey,
+        workDate: normalizeWorkDateIST(dateKey) || getISTDateISO(),
+        records: staffRecords,
+        targetMinutes,
+        graceMinutes,
+        expectedInMinutes
+      })
+    }).catch(() => {});
+  }
 
   updateSavedReportsDropdown();
 }
@@ -138,7 +194,11 @@ function updateSavedReportsDropdown() {
   if (!selectSavedReports) return;
 
   const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
-  const savedDates = Object.keys(db).sort().reverse();
+  const savedDates = Object.keys(db).sort((a, b) => {
+    const isoA = normalizeWorkDateIST(a) || a;
+    const isoB = normalizeWorkDateIST(b) || b;
+    return isoB.localeCompare(isoA);
+  });
 
   selectSavedReports.innerHTML = '<option value="">-- Select Date --</option>';
   savedDates.forEach(date => {
@@ -155,7 +215,16 @@ function updateSavedReportsDropdown() {
 }
 
 function renderApp() {
-  const { processedRecords, metrics } = calculateSummaryMetrics(staffRecords, targetMinutes, graceMinutes, expectedInMinutes);
+  const activeISO = normalizeWorkDateIST(inputReportDate?.value || reportDate);
+  const todayIST = getISTDateISO();
+  const isPreviousDay = Boolean(activeISO && activeISO < todayIST);
+  const { processedRecords, metrics } = calculateSummaryMetrics(
+    staffRecords,
+    targetMinutes,
+    graceMinutes,
+    expectedInMinutes,
+    { isPreviousDay }
+  );
 
   statTotal.textContent = metrics.totalStaff;
   statPresent.textContent = metrics.presentCount;
@@ -215,9 +284,13 @@ function renderTable(records) {
     }
     
     // Format custom individual shift target label if set
-    const shiftLabel = r.targetMinutes !== undefined && r.targetMinutes !== targetMinutes
+    const shiftLabel = r.targetMinutes !== undefined && r.targetMinutes !== null && r.targetMinutes !== targetMinutes
       ? ` (${(r.targetMinutes / 60).toFixed(1)}h)`
       : '';
+
+    const remarksHtml = r.isIncompletePreviousDay
+      ? `<span style="color: var(--amber-text); font-weight: 700;">Incomplete / Manual Review Required</span>`
+      : esc(r.remarks || '-');
 
     tr.innerHTML = `
       <td>${r.slNo}</td>
@@ -232,7 +305,7 @@ function renderTable(records) {
       <td>${esc(r.finalOut || '-')}</td>
       <td class="${r.isShortfall && !r.isAbsent ? 'cell-shortfall' : ''}">${r.totalWorkingHours}</td>
       <td class="${r.isShortfall && !r.isAbsent ? 'cell-shortfall' : ''}">${r.shortfall}</td>
-      <td style="font-size: 0.75rem; color: var(--text-muted);">${esc(r.remarks || '-')}</td>
+      <td style="font-size: 0.75rem; color: var(--text-muted);">${remarksHtml}</td>
       <td>
         <button class="action-btn edit-btn" data-id="${realIndex}" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
         <button class="action-btn delete delete-btn" data-id="${realIndex}" title="Remove"><i class="fa-solid fa-trash-can"></i></button>
@@ -499,8 +572,8 @@ function setupEventListeners() {
       masterDirModal.style.display = 'flex';
     });
     document.getElementById('btn-close-dir-modal')?.addEventListener('click', () => masterDirModal.style.display = 'none');
-    document.getElementById('btn-add-dir-staff')?.addEventListener('click', addMasterStaffName);
-    document.getElementById('btn-sync-dir-roster')?.addEventListener('click', importStaffFromRegister);
+    document.getElementById('btn-add-dir-staff')?.addEventListener('click', e => withButtonLoading(e.currentTarget, 'Adding...', () => addMasterStaffName()));
+    document.getElementById('btn-sync-dir-roster')?.addEventListener('click', e => withButtonLoading(e.currentTarget, 'Importing...', () => importStaffFromRegister()));
     document.getElementById('btn-clear-dir')?.addEventListener('click', clearMasterDirectory);
   }
 
@@ -509,12 +582,17 @@ function setupEventListeners() {
   const monthlyMatrixModal = document.getElementById('monthly-matrix-modal');
   if (btnMonthlyMatrix && monthlyMatrixModal) {
     btnMonthlyMatrix.addEventListener('click', () => {
+      const matrixExpEl = document.getElementById('select-matrix-expected-in');
+      if (matrixExpEl && Array.from(matrixExpEl.options).some(o => Number(o.value) === expectedInMinutes)) {
+        matrixExpEl.value = String(expectedInMinutes);
+      }
       renderMonthlyMatrix();
       monthlyMatrixModal.style.display = 'flex';
     });
     document.getElementById('btn-close-matrix-modal')?.addEventListener('click', () => monthlyMatrixModal.style.display = 'none');
-    document.getElementById('btn-export-matrix-csv')?.addEventListener('click', exportMonthlyMatrixCSV);
+    document.getElementById('btn-export-matrix-csv')?.addEventListener('click', e => withButtonLoading(e.currentTarget, 'Exporting...', () => exportMonthlyMatrixCSV()));
     document.getElementById('input-daily-rate')?.addEventListener('input', renderMonthlyMatrix);
+    document.getElementById('select-matrix-expected-in')?.addEventListener('change', renderMonthlyMatrix);
     document.getElementById('select-late-rule')?.addEventListener('change', renderMonthlyMatrix);
   }
 
@@ -619,42 +697,52 @@ function setupEventListeners() {
 
   const btnLoadDemo = document.getElementById('btn-load-demo');
   if (btnLoadDemo) {
-    btnLoadDemo.addEventListener('click', () => {
-      if (staffRecords.length > 0 && !confirm("This will replace your current active records with the demo register. Continue?")) {
-        return;
-      }
-      staffRecords = JSON.parse(JSON.stringify(HANDWRITTEN_REGISTER_DATA));
-      reportDate = "03/09/2026 THURSDAY";
-      inputReportDate.value = reportDate;
-      renderApp();
-      saveRosterToCache();
-      showToast(`Loaded ${staffRecords.length} staff records from demo register!`, "success");
+    btnLoadDemo.addEventListener('click', (e) => {
+      withButtonLoading(e.currentTarget, 'Loading Demo...', () => {
+        if (staffRecords.length > 0 && !confirm("This will replace your current active records with the demo register. Continue?")) {
+          return;
+        }
+        staffRecords = JSON.parse(JSON.stringify(HANDWRITTEN_REGISTER_DATA));
+        reportDate = "03/09/2026 THURSDAY";
+        inputReportDate.value = reportDate;
+        renderApp();
+        saveRosterToCache();
+        showToast(`Loaded ${staffRecords.length} staff records from demo register!`, "success");
+      });
     });
   }
 
   document.getElementById('btn-add-staff').addEventListener('click', () => openAddModal());
 
-  document.getElementById('btn-export-pdf').addEventListener('click', () => {
+  document.getElementById('btn-export-pdf').addEventListener('click', (e) => {
     if (staffRecords.length === 0) {
       showToast("Upload handwritten document(s) first!", "info");
       return;
     }
-    const { processedRecords, metrics } = calculateSummaryMetrics(staffRecords, targetMinutes, graceMinutes, expectedInMinutes);
-    generateAttendancePDF(processedRecords, metrics, inputReportDate.value || reportDate);
-    showToast("PDF Report downloaded!", "success");
+    withButtonLoading(e.currentTarget, 'Generating PDF...', () => {
+      const activeISO = normalizeWorkDateIST(inputReportDate.value || reportDate);
+      const isPrev = Boolean(activeISO && activeISO < getISTDateISO());
+      const { processedRecords, metrics } = calculateSummaryMetrics(staffRecords, targetMinutes, graceMinutes, expectedInMinutes, { isPreviousDay: isPrev });
+      generateAttendancePDF(processedRecords, metrics, inputReportDate.value || reportDate);
+      showToast("PDF Report downloaded!", "success");
+    });
   });
 
-  document.getElementById('btn-export-csv').addEventListener('click', () => {
+  document.getElementById('btn-export-csv').addEventListener('click', (e) => {
     if (staffRecords.length === 0) {
       showToast("Upload handwritten document(s) first!", "info");
       return;
     }
-    const { processedRecords, metrics } = calculateSummaryMetrics(staffRecords, targetMinutes, graceMinutes, expectedInMinutes);
-    exportAttendanceCSV(processedRecords, metrics, inputReportDate.value || reportDate);
-    showToast("Excel/CSV Report downloaded!", "success");
+    withButtonLoading(e.currentTarget, 'Exporting CSV...', () => {
+      const activeISO = normalizeWorkDateIST(inputReportDate.value || reportDate);
+      const isPrev = Boolean(activeISO && activeISO < getISTDateISO());
+      const { processedRecords, metrics } = calculateSummaryMetrics(staffRecords, targetMinutes, graceMinutes, expectedInMinutes, { isPreviousDay: isPrev });
+      exportAttendanceCSV(processedRecords, metrics, inputReportDate.value || reportDate);
+      showToast("Excel/CSV Report downloaded!", "success");
+    });
   });
 
-  document.getElementById('btn-copy-image').addEventListener('click', async () => {
+  document.getElementById('btn-copy-image').addEventListener('click', async (e) => {
     if (staffRecords.length === 0) {
       showToast("Upload handwritten document(s) first!", "info");
       return;
@@ -665,40 +753,45 @@ function setupEventListeners() {
       return;
     }
 
-    showToast("Capturing high-resolution report image...", "info");
-    const targetEl = document.getElementById('report-table-card');
+    await withButtonLoading(e.currentTarget, 'Capturing...', async () => {
+      showToast("Capturing high-resolution report image...", "info");
+      const targetEl = document.getElementById('report-table-card');
 
-    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-    try {
-      const cvs = await window.html2canvas(targetEl, {
-        scale: 2,
-        backgroundColor: isLight ? '#ffffff' : '#1e293b'
-      });
+      const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      try {
+        const cvs = await window.html2canvas(targetEl, {
+          scale: 2,
+          backgroundColor: isLight ? '#ffffff' : '#1e293b'
+        });
 
-      cvs.toBlob(async (blob) => {
-        if (blob) {
-          try {
-            await navigator.clipboard.write([
-              new ClipboardItem({ 'image/png': blob })
-            ]);
-            showToast("Report image copied to clipboard! Press Ctrl+V in WhatsApp Web to paste.", "success");
-          } catch (err) {
-            const url = URL.createObjectURL(blob);
-            const safeDate = String(inputReportDate.value || reportDate).replace(/[\/\\:*?"<>|]/g, '-').trim() || 'Report';
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `Attendance_Report_${safeDate}.png`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(url), 1500);
-            showToast("Report image downloaded!", "success");
-          }
-        }
-      });
-    } catch (err) {
-      showToast(`Image Copy Error: ${err.message}`, "info");
-    }
+        await new Promise((resolve) => {
+          cvs.toBlob(async (blob) => {
+            if (blob) {
+              try {
+                await navigator.clipboard.write([
+                  new ClipboardItem({ 'image/png': blob })
+                ]);
+                showToast("Report image copied to clipboard! Press Ctrl+V in WhatsApp Web to paste.", "success");
+              } catch (err) {
+                const url = URL.createObjectURL(blob);
+                const safeDate = String(inputReportDate.value || reportDate).replace(/[\/\\:*?"<>|]/g, '-').trim() || 'Report';
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Attendance_Report_${safeDate}.png`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 1500);
+                showToast("Report image downloaded!", "success");
+              }
+            }
+            resolve();
+          });
+        });
+      } catch (err) {
+        showToast(`Image Copy Error: ${err.message}`, "info");
+      }
+    });
   });
 
   document.getElementById('btn-whatsapp-share').addEventListener('click', () => {
@@ -766,10 +859,12 @@ function setupEventListeners() {
   }
 
   if (btnProcessGallery) {
-    btnProcessGallery.addEventListener('click', async () => {
+    btnProcessGallery.addEventListener('click', async (e) => {
       if (capturedPhotos.length === 0) return;
-      cameraGalleryModal.style.display = 'none';
-      await handleMultipleFilesSelected(capturedPhotos);
+      await withButtonLoading(e.currentTarget, 'Processing...', async () => {
+        cameraGalleryModal.style.display = 'none';
+        await handleMultipleFilesSelected(capturedPhotos);
+      });
     });
   }
 
@@ -828,67 +923,69 @@ function setupEventListeners() {
     }
   });
 
-  document.getElementById('btn-scan-confirmed').addEventListener('click', async () => {
+  document.getElementById('btn-scan-confirmed').addEventListener('click', async (e) => {
     if (!currentCanvas) return;
-    docPreviewModal.style.display = 'none';
-    ocrStatus.style.display = 'block';
+    await withButtonLoading(e.currentTarget, 'Scanning...', async () => {
+      docPreviewModal.style.display = 'none';
+      ocrStatus.style.display = 'block';
 
-    try {
-      let scanResult;
+      try {
+        let scanResult;
 
-      if (currentPdfBuffer && totalPdfPages > 1) {
-        ocrMsg.textContent = `Scanning all ${totalPdfPages} pages with Gemini AI Vision...`;
-        scanResult = await processAllPdfPages(currentPdfBuffer, currentRotation, (progress, msg) => {
-          ocrMsg.textContent = msg;
-        });
-      } else {
-        ocrMsg.textContent = "Sending to Gemini AI Vision for handwriting recognition...";
-        const rotatedCvs = rotateCanvas(currentCanvas, currentRotation);
-        const finalCvs = isContrastEnhanced ? enhanceDocumentContrast(rotatedCvs) : rotatedCvs;
-        scanResult = await processCanvasOCR(finalCvs, (progress, msg) => {
-          ocrMsg.textContent = msg;
-        });
-      }
+        if (currentPdfBuffer && totalPdfPages > 1) {
+          ocrMsg.textContent = `Scanning all ${totalPdfPages} pages with Gemini AI Vision...`;
+          scanResult = await processAllPdfPages(currentPdfBuffer, currentRotation, (progress, msg) => {
+            ocrMsg.textContent = msg;
+          });
+        } else {
+          ocrMsg.textContent = "Sending to Gemini AI Vision for handwriting recognition...";
+          const rotatedCvs = rotateCanvas(currentCanvas, currentRotation);
+          const finalCvs = isContrastEnhanced ? enhanceDocumentContrast(rotatedCvs) : rotatedCvs;
+          scanResult = await processCanvasOCR(finalCvs, (progress, msg) => {
+            ocrMsg.textContent = msg;
+          });
+        }
 
-      if (scanResult && scanResult.records && scanResult.records.length > 0) {
-        if (staffRecords.length > 0) {
-          const shouldAppend = confirm(
-            `You already have ${staffRecords.length} staff records loaded.\n\n` +
-            `Click "OK" to COMBINE & APPEND the new ${scanResult.records.length} records (Total ~${staffRecords.length + scanResult.records.length} staff).\n\n` +
-            `Click "Cancel" to REPLACE and start fresh with this page only.`
-          );
-          if (shouldAppend) {
-            staffRecords = deduplicateAndMergeRecords(staffRecords.concat(scanResult.records));
-            showToast(`Combined pages! Tracking ${staffRecords.length} total staff members.`, "success");
+        if (scanResult && scanResult.records && scanResult.records.length > 0) {
+          if (staffRecords.length > 0) {
+            const shouldAppend = confirm(
+              `You already have ${staffRecords.length} staff records loaded.\n\n` +
+              `Click "OK" to COMBINE & APPEND the new ${scanResult.records.length} records (Total ~${staffRecords.length + scanResult.records.length} staff).\n\n` +
+              `Click "Cancel" to REPLACE and start fresh with this page only.`
+            );
+            if (shouldAppend) {
+              staffRecords = deduplicateAndMergeRecords(staffRecords.concat(scanResult.records));
+              showToast(`Combined pages! Tracking ${staffRecords.length} total staff members.`, "success");
+            } else {
+              staffRecords = scanResult.records;
+              showToast(`Loaded ${staffRecords.length} staff records for new report.`, "success");
+            }
           } else {
             staffRecords = scanResult.records;
-            showToast(`Loaded ${staffRecords.length} staff records for new report.`, "success");
+            showToast(`Gemini extracted ${scanResult.records.length} unique staff records! Date: ${scanResult.reportDate || 'Default'}`, "success");
           }
+          if (scanResult.reportDate && (!reportDate || staffRecords.length === scanResult.records.length)) {
+            reportDate = scanResult.reportDate;
+            inputReportDate.value = reportDate;
+          }
+          renderApp();
+          saveRosterToCache();
         } else {
-          staffRecords = scanResult.records;
-          showToast(`Gemini extracted ${scanResult.records.length} unique staff records! Date: ${scanResult.reportDate || 'Default'}`, "success");
+          showToast("No records found. Try rotating the document.", "info");
         }
-        if (scanResult.reportDate && (!reportDate || staffRecords.length === scanResult.records.length)) {
-          reportDate = scanResult.reportDate;
-          inputReportDate.value = reportDate;
+      } catch (err) {
+        showToast(`Scan Error: ${err.message}`, "info");
+      } finally {
+        ocrStatus.style.display = 'none';
+        if (fileInput) fileInput.value = '';
+        if (cameraInput) cameraInput.value = '';
+        if (currentCanvas) {
+          currentCanvas.width = 0;
+          currentCanvas.height = 0;
+          currentCanvas = null;
         }
-        renderApp();
-        saveRosterToCache();
-      } else {
-        showToast("No records found. Try rotating the document.", "info");
       }
-    } catch (err) {
-      showToast(`Scan Error: ${err.message}`, "info");
-    } finally {
-      ocrStatus.style.display = 'none';
-      if (fileInput) fileInput.value = '';
-      if (cameraInput) cameraInput.value = '';
-      if (currentCanvas) {
-        currentCanvas.width = 0;
-        currentCanvas.height = 0;
-        currentCanvas = null;
-      }
-    }
+    });
   });
 
   document.getElementById('btn-close-doc-modal').addEventListener('click', () => {
@@ -932,7 +1029,10 @@ function setupEventListeners() {
 
   document.getElementById('btn-close-modal').addEventListener('click', closeModal);
   document.getElementById('btn-cancel-modal').addEventListener('click', closeModal);
-  editForm.addEventListener('submit', e => { e.preventDefault(); saveModalRecord(); });
+  editForm.addEventListener('submit', e => {
+    e.preventDefault();
+    withButtonLoading(document.getElementById('btn-save-modal'), 'Saving...', () => saveModalRecord());
+  });
 
   // Global backdrop click to dismiss open modals
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
@@ -1271,6 +1371,48 @@ function saveModalRecord() {
     remarks: remarksVal
   };
 
+  if (!record.name) {
+    showToast("Staff Name is required.", "info");
+    return;
+  }
+
+  // Atomic check-in idempotency guard on (employee_id, work_date)
+  const newEmpId = normalizeEmployeeId(record.name);
+  const duplicateIdx = staffRecords.findIndex((existing, i) => i !== index && normalizeEmployeeId(existing.name) === newEmpId);
+  if (duplicateIdx !== -1) {
+    showToast(`Duplicate blocked: ${record.name} already has a check-in session for ${inputReportDate.value || reportDate}. Edit the existing entry instead.`, "info");
+    return;
+  }
+
+  const curDateStr = (inputReportDate.value || reportDate).trim();
+  const curISO = normalizeWorkDateIST(curDateStr);
+  const todayIST = getISTDateISO();
+  const isPrevDay = Boolean(curISO && curISO < todayIST);
+
+  const inUpper = record.in.toUpperCase();
+  const outUpper = record.finalOut.toUpperCase();
+
+  // Strictly validate check_out_time > check_in_time when both are entered
+  if (record.in && record.finalOut && inUpper !== 'AB' && outUpper !== 'AB' && outUpper !== 'NOTPUNCHED' && outUpper !== '-') {
+    const checkComputed = calculateAttendanceRecord(record, targetMinutes, graceMinutes, expectedInMinutes, { isPreviousDay: isPrevDay });
+    if (checkComputed.isInvalidTimeOrder) {
+      showToast("Validation Error: Check-Out time must be strictly later than Check-In time! (Add 'overnight' in Remarks for night shifts)", "info");
+      return;
+    }
+    if (checkComputed.totalWorkingHours === 'INVALID') {
+      showToast("Validation Error: Invalid time format. Please use HH:MM or HH:MM AM/PM.", "info");
+      return;
+    }
+  }
+
+  // Auto-flag unclosed check-ins from previous IST calendar days
+  if (isPrevDay && record.in && inUpper !== 'AB' && (!record.finalOut || outUpper === 'NOTPUNCHED' || outUpper === '-')) {
+    record.sessionStatus = 'INCOMPLETE_MANUAL_REVIEW';
+    if (!record.remarks.includes('Incomplete / Manual Review Required')) {
+      record.remarks = record.remarks ? `${record.remarks} | Incomplete / Manual Review Required` : 'Incomplete / Manual Review Required';
+    }
+  }
+
   if (index >= 0) { staffRecords[index] = record; }
   else { staffRecords.push(record); }
   
@@ -1291,7 +1433,9 @@ function deleteRecord(index) {
 }
 
 function openWhatsAppModal() {
-  const { processedRecords, metrics } = calculateSummaryMetrics(staffRecords, targetMinutes, graceMinutes, expectedInMinutes);
+  const activeISO = normalizeWorkDateIST(inputReportDate.value || reportDate);
+  const isPrevDay = Boolean(activeISO && activeISO < getISTDateISO());
+  const { processedRecords, metrics } = calculateSummaryMetrics(staffRecords, targetMinutes, graceMinutes, expectedInMinutes, { isPreviousDay: isPrevDay });
   const shortfall = processedRecords.filter(r => r.isShortfall && !r.isAbsent);
   const lateInStaff = processedRecords.filter(r => r.isLateIn && !r.isAbsent);
   const absentees = processedRecords.filter(r => r.isAbsent);
@@ -1360,11 +1504,21 @@ function checkDiscrepancies(processedRecords) {
   if (!discrepancyPanel || !discrepancyList || !discrepancyBadge) return;
 
   const patternAlerts = [];
+  const todayIST = getISTDateISO();
+  const activeDateKey = (inputReportDate?.value || reportDate || '').trim();
 
-  // 1. Identify missing punch out, invalid times, and unclosed breaks today
+  // 1. Identify missing punch out, incomplete previous-day sessions, invalid time orders, and unclosed breaks
   processedRecords.forEach((r) => {
     const origIdx = r._originalIndex !== undefined ? r._originalIndex : -1;
-    if (r.isNotPunched) {
+    if (r.isIncompletePreviousDay) {
+      patternAlerts.push({
+        category: 'Incomplete / Manual Review Required',
+        severity: 'danger',
+        icon: 'fa-solid fa-triangle-exclamation',
+        message: `${r.name}: Previous-day check-in (${r.in || '-'}) was left unclosed — Manual Review Required.`,
+        recordIndex: origIdx
+      });
+    } else if (r.isNotPunched) {
       patternAlerts.push({
         category: 'Missing Check-Out',
         severity: 'warning',
@@ -1374,7 +1528,15 @@ function checkDiscrepancies(processedRecords) {
       });
     }
 
-    if (r.totalWorkingHours === 'INVALID') {
+    if (r.isInvalidTimeOrder) {
+      patternAlerts.push({
+        category: 'Invalid Time Order',
+        severity: 'danger',
+        icon: 'fa-solid fa-clock',
+        message: `${r.name}: Check-Out (${r.finalOut || '-'}) is earlier than or equal to Check-In (${r.in || '-'}).`,
+        recordIndex: origIdx
+      });
+    } else if (r.totalWorkingHours === 'INVALID') {
       patternAlerts.push({
         category: 'Invalid Punch Time',
         severity: 'danger',
@@ -1399,10 +1561,31 @@ function checkDiscrepancies(processedRecords) {
     }
   });
 
-  // 2. Scan historical database in localStorage for repetitive negative patterns
+  // 2. Scan historical database in localStorage for unclosed previous-day check-ins and repetitive negative patterns
   const db = safeJsonParse(localStorage.getItem('attendance_tracker_rosters') || '{}');
   const savedDates = Object.keys(db);
   const totalSavedDays = savedDates.length;
+
+  // Check prior IST dates (other than the currently loaded date) for unclosed check-ins
+  savedDates.forEach(dateKey => {
+    if (dateKey === activeDateKey) return;
+    const dateISO = normalizeWorkDateIST(dateKey);
+    if (!dateISO || dateISO >= todayIST) return;
+
+    const dailyRecords = db[dateKey] || [];
+    dailyRecords.forEach(r => {
+      const computed = calculateAttendanceRecord(r, targetMinutes, graceMinutes, expectedInMinutes, { isPreviousDay: true });
+      if (computed.isIncompletePreviousDay) {
+        patternAlerts.push({
+          category: 'Incomplete / Manual Review Required',
+          severity: 'danger',
+          icon: 'fa-solid fa-triangle-exclamation',
+          message: `${r.name} (${dateKey}): Previous-day check-in (${r.in || '-'}) left unclosed — Manual Review Required.`,
+          reviewDate: dateKey
+        });
+      }
+    });
+  });
 
   if (totalSavedDays >= 2) {
     const staffHistory = {};
@@ -1553,6 +1736,19 @@ function checkDiscrepancies(processedRecords) {
       fixBtn.title = 'Edit staff record';
       fixBtn.onclick = () => openEditModal(item.recordIndex);
       btnGroup.appendChild(fixBtn);
+    } else if (item.reviewDate) {
+      const reviewBtn = document.createElement('button');
+      reviewBtn.className = 'btn btn-outline';
+      reviewBtn.style.cssText = 'padding: 3px 8px; font-size: 0.75rem; border-color: #f59e0b; color: #fbbf24;';
+      reviewBtn.innerHTML = '<i class="fa-solid fa-calendar-check"></i> Review';
+      reviewBtn.title = `Load ${item.reviewDate} to review unclosed check-in`;
+      reviewBtn.onclick = () => {
+        reportDate = item.reviewDate;
+        inputReportDate.value = item.reviewDate;
+        loadRosterFromCache(item.reviewDate);
+        updateSavedReportsDropdown();
+      };
+      btnGroup.appendChild(reviewBtn);
     }
 
     const dismissBtn = document.createElement('button');
@@ -1688,6 +1884,26 @@ function clearMasterDirectory() {
  * alter the payroll data for all past days in the month. 
  * A future database schema update should lock in daily rules per-record.
  */
+function getMonthlyMatrixOptions() {
+  const dailyRateVal = parseFloat(document.getElementById('input-daily-rate')?.value);
+  const dailyRate = Number.isFinite(dailyRateVal) && dailyRateVal >= 0 ? dailyRateVal : 500;
+
+  const lateRuleVal = parseInt(document.getElementById('select-late-rule')?.value, 10);
+  const lateDeductionRule = Number.isFinite(lateRuleVal) && lateRuleVal >= 0 ? lateRuleVal : 3;
+
+  const matrixExpVal = parseInt(document.getElementById('select-matrix-expected-in')?.value, 10);
+  const matrixExpectedIn = Number.isFinite(matrixExpVal) && matrixExpVal >= 0 ? matrixExpVal : expectedInMinutes;
+
+  return {
+    targetMinutes,
+    graceMinutes,
+    expectedInMinutes: matrixExpectedIn,
+    dailyRate,
+    lateDeductionRule,
+    normalizeNameFn: fuzzyMatchMasterName
+  };
+}
+
 function renderMonthlyMatrix() {
   const tableBody = document.getElementById('matrix-table-body');
   if (!tableBody) return;
@@ -1696,49 +1912,12 @@ function renderMonthlyMatrix() {
   const savedDates = Object.keys(db);
 
   if (savedDates.length === 0) {
-    tableBody.innerHTML = `<tr><td colspan="8" style="padding: 30px; text-align: center; color: var(--text-muted);">No saved daily rosters found in storage. Process attendance registers first!</td></tr>`;
+    tableBody.innerHTML = `<tr><td colspan="11" style="padding: 30px; text-align: center; color: var(--text-muted);">No saved daily rosters found in storage. Process attendance registers first!</td></tr>`;
     return;
   }
 
-  const staffStatsMap = {};
-
-  savedDates.forEach(dateKey => {
-    const dailyRecords = db[dateKey] || [];
-    dailyRecords.forEach(r => {
-      let name = (r.name || '').trim().toUpperCase();
-      if (!name) return;
-      name = fuzzyMatchMasterName(name);
-
-      if (!staffStatsMap[name]) {
-        staffStatsMap[name] = {
-          name,
-          presentDays: 0,
-          lateDays: 0,
-          shortfallDays: 0,
-          absentDays: 0
-        };
-      }
-
-      // Compute attendance flags from raw record data
-      const computed = calculateAttendanceRecord(r, targetMinutes, graceMinutes, expectedInMinutes);
-      const stats = staffStatsMap[name];
-      if (computed.isAbsent) {
-        stats.absentDays++;
-      } else {
-        stats.presentDays++;
-        if (computed.isLateIn) stats.lateDays++;
-        if (computed.isShortfall) stats.shortfallDays++;
-      }
-    });
-  });
-
-  const dailyRateVal = parseFloat(document.getElementById('input-daily-rate')?.value);
-  const dailyRate = !isNaN(dailyRateVal) ? dailyRateVal : 500;
-  const lateRuleVal = parseInt(document.getElementById('select-late-rule')?.value, 10);
-  const lateRule = !isNaN(lateRuleVal) ? lateRuleVal : 3;
-
-  const rawList = Object.values(staffStatsMap);
-  const payrollList = calculatePayroll(rawList, { dailyRate, lateDeductionRule: lateRule });
+  const options = getMonthlyMatrixOptions();
+  const payrollList = aggregateMonthlyAttendance(db, options);
   payrollList.sort((a, b) => a.name.localeCompare(b.name));
 
   tableBody.innerHTML = '';
@@ -1749,9 +1928,12 @@ function renderMonthlyMatrix() {
     tr.innerHTML = `
       <td style="padding: 10px; text-align: left; font-weight: 600; position: sticky; left: 0; background: var(--bg-main); border-right: 1px solid var(--border-color);">${esc(s.name)}</td>
       <td style="padding: 10px; color: var(--success-text); font-weight: 600;">${s.presentDays}</td>
-      <td style="padding: 10px; color: ${s.lateDays > 0 ? 'var(--amber-text)' : 'inherit'};">${s.lateDays}</td>
+      <td style="padding: 10px; color: ${s.halfDays > 0 ? 'var(--amber-text)' : 'inherit'};">${s.halfDays}</td>
+      <td style="padding: 10px; color: ${s.lateCheckIns > 0 ? 'var(--amber-text)' : 'inherit'};">${s.lateCheckIns}</td>
       <td style="padding: 10px; color: ${s.shortfallDays > 0 ? 'var(--red-text)' : 'inherit'};">${s.shortfallDays}</td>
       <td style="padding: 10px; color: ${s.absentDays > 0 ? '#ef4444' : 'inherit'};">${s.absentDays}</td>
+      <td style="padding: 10px; font-variant-numeric: tabular-nums;">${s.totalHoursWorked}</td>
+      <td style="padding: 10px; font-variant-numeric: tabular-nums; color: ${s.totalOvertimeMinutes > 0 ? 'var(--success-text)' : 'inherit'};">${s.totalOvertimeHours}</td>
       <td style="padding: 10px; color: var(--red-text);">${s.latePenaltyDays > 0 ? '-' + s.latePenaltyDays + ' Days' : '0'}</td>
       <td style="padding: 10px; font-weight: 700; color: var(--accent-primary);">${s.netPayableDays} Days</td>
       <td style="padding: 10px; font-weight: 700; color: var(--success-text);">₹${s.estimatedSalary.toLocaleString()}</td>
@@ -1768,56 +1950,31 @@ function exportMonthlyMatrixCSV() {
     return;
   }
 
-  const staffStatsMap = {};
-  savedDates.forEach(dateKey => {
-    const dailyRecords = db[dateKey] || [];
-    dailyRecords.forEach(r => {
-      let name = (r.name || '').trim().toUpperCase();
-      if (!name) return;
-      name = fuzzyMatchMasterName(name);
-
-      if (!staffStatsMap[name]) {
-        staffStatsMap[name] = { name, presentDays: 0, lateDays: 0, shortfallDays: 0, absentDays: 0 };
-      }
-      // Compute attendance flags from raw record data
-      const computed = calculateAttendanceRecord(r, targetMinutes, graceMinutes, expectedInMinutes);
-      const stats = staffStatsMap[name];
-      if (computed.isAbsent) stats.absentDays++;
-      else {
-        stats.presentDays++;
-        if (computed.isLateIn) stats.lateDays++;
-        if (computed.isShortfall) stats.shortfallDays++;
-      }
-    });
-  });
-
-  const dailyRateVal = parseFloat(document.getElementById('input-daily-rate')?.value);
-  const dailyRate = !isNaN(dailyRateVal) ? dailyRateVal : 500;
-  const lateRuleVal = parseInt(document.getElementById('select-late-rule')?.value, 10);
-  const lateRule = !isNaN(lateRuleVal) ? lateRuleVal : 3;
-
-  const rawList = Object.values(staffStatsMap);
-  const payrollList = calculatePayroll(rawList, { dailyRate, lateDeductionRule: lateRule });
+  const options = getMonthlyMatrixOptions();
+  const payrollList = aggregateMonthlyAttendance(db, options);
   payrollList.sort((a, b) => a.name.localeCompare(b.name));
 
-  let csv = `MONTHLY ATTENDANCE & PAYROLL SUMMARY MATRIX\n`;
-  csv += `Daily Wage Rate: ₹${dailyRate}, Late Deduction Rule: Every ${lateRule} Lates = 0.5 Days Penalty\n\n`;
-  csv += `STAFF NAME,PRESENT DAYS,LATE DAYS,SHORTFALL DAYS,ABSENT DAYS,LATE PENALTY DAYS,NET PAYABLE DAYS,ESTIMATED SALARY (INR)\n`;
+  const expHrs = Math.floor(options.expectedInMinutes / 60);
+  const expMins = String(options.expectedInMinutes % 60).padStart(2, '0');
+  let csv = `MONTHLY ATTENDANCE & PAYROLL SUMMARY MATRIX (IST Asia/Kolkata)\n`;
+  csv += `Daily Wage Rate: ₹${options.dailyRate}, Shift Start Threshold: ${String(expHrs).padStart(2, '0')}:${expMins}, Late Deduction Rule: Every ${options.lateDeductionRule} Lates = 0.5 Days Penalty\n\n`;
+  csv += `STAFF NAME,PRESENT DAYS,HALF DAYS,LATE CHECK-INS,SHORTFALL DAYS,ABSENT DAYS,TOTAL HOURS WORKED,OVERTIME HOURS,LATE PENALTY DAYS,NET PAYABLE DAYS,ESTIMATED SALARY (INR)\n`;
 
   payrollList.forEach(s => {
-    csv += `"${s.name}",${s.presentDays},${s.lateDays},${s.shortfallDays},${s.absentDays},${s.latePenaltyDays},${s.netPayableDays},${s.estimatedSalary}\n`;
+    const safeName = (s.name || '').replace(/"/g, '""');
+    csv += `"${safeName}",${s.presentDays},${s.halfDays},${s.lateCheckIns},${s.shortfallDays},${s.absentDays},"${s.totalHoursWorked}","${s.totalOvertimeHours}",${s.latePenaltyDays},${s.netPayableDays},${s.estimatedSalary}\n`;
   });
 
   const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Monthly_Payroll_Matrix_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `Monthly_Payroll_Matrix_${getISTDateISO()}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1500);
-  showToast("Monthly Payroll Excel exported successfully!", "success");
+  showToast("Monthly Payroll CSV exported successfully!", "success");
 }
 
 /* ==========================================================================
@@ -1830,7 +1987,8 @@ function exportBackupJSON() {
 
   const backupData = {
     version: 1,
-    exportDate: new Date().toISOString(),
+    exportDate: getISTTimestamp(),
+    timezone: 'Asia/Kolkata',
     rosters,
     masterDirectory: masterDir,
     theme
@@ -1841,7 +1999,7 @@ function exportBackupJSON() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Attendance_Backup_${new Date().toISOString().slice(0,10)}.json`;
+  a.download = `Attendance_Backup_${getISTDateISO()}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

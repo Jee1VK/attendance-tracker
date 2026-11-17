@@ -3,7 +3,9 @@
  * Generates exact matching multi-page PDF reports with Red highlights for short hours.
  */
 
-export function generateAttendancePDF(processedRecords, metrics, reportDate = new Date().toLocaleDateString('en-GB')) {
+import { getISTDisplayDate } from './attendanceCalculator.js';
+
+export function generateAttendancePDF(processedRecords, metrics, reportDate = getISTDisplayDate()) {
   if (!window.jspdf || !window.jspdf.jsPDF) {
     alert("PDF library is loading. Please try again in a moment.");
     return;

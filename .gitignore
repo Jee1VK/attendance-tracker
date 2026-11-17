@@ -14,3 +14,7 @@ __pycache__/
 node_modules/
 temp-bundle.js
 *.tmp
+
+# Local SQLite database
+*.db
+*.db-journal
